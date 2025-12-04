@@ -12,6 +12,9 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Signika:wght@400;700&display=swap" rel="stylesheet">
 
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome-css/all.min.css') }}">
+
     <!-- Main CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 
@@ -26,7 +29,7 @@
         <header class="header">
             <h1>Foundry Portal</h1>
             <button id="admin-btn" class="icon-btn" title="Admin Settings">
-                <img src="/static/images/gear-icon.svg" alt="Settings" style="width: 24px; height: 24px;">
+                <i class="fas fa-cog" style="font-size: 24px; color: #e8eff7;"></i>
             </button>
         </header>
 
@@ -167,8 +170,8 @@
     <script>
         window.portalState = {
             isConfigured: {{ 'true' if is_configured else 'false' }},
-        viewerLocked: {{ 'true' if viewer_locked else 'false' }},
-        isAdmin: {{ 'true' if is_admin else 'false' }}
+        viewerLocked: { { 'true' if viewer_locked else 'false' } },
+        isAdmin: { { 'true' if is_admin else 'false' } }
         };
     </script>
 </body>

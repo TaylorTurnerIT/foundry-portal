@@ -245,6 +245,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // Update Instance List
             const instanceCard = document.createElement('div');
             instanceCard.className = `instance-card ${instance.status}`;
+
+            // Add background image if available
+            if (instance.background) {
+                instanceCard.style.backgroundImage = `url('${instance.url}${instance.background}')`;
+                instanceCard.style.backgroundSize = 'cover';
+                instanceCard.style.backgroundPosition = 'center';
+            }
+
             instanceCard.innerHTML = `
                 <div class="instance-header">
                     <span class="status-dot"></span>
