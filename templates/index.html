@@ -28,9 +28,6 @@
         <!-- Header -->
         <header class="header">
             <h1>Foundry Portal</h1>
-            <button id="admin-btn" class="icon-btn" title="Admin Settings">
-                <i class="fas fa-cog" style="font-size: 24px; color: #e8eff7;"></i>
-            </button>
         </header>
 
         <!-- Navigation Menu -->
@@ -40,6 +37,10 @@
             </button>
             <button type="button" onclick="location.href='https://github.com/daxiongmao87/foundry-portal';">
                 <img class="fa-fake" src="/static/images/github-fa-fake.png" alt="GitHub Repository">
+            </button>
+            <div class="nav-separator"></div>
+            <button id="admin-btn" type="button" title="Admin Settings">
+                <i class="fas fa-cog" style="font-size: 24px; color: #e8eff7;"></i>
             </button>
         </nav>
 
@@ -94,6 +95,7 @@
     <!-- Login Modal -->
     <div id="login-modal" class="modal" style="display: none;">
         <div class="modal-content">
+            <span class="close">&times;</span>
             <h2 id="login-title">Admin Login</h2>
             <form id="login-form">
                 <div class="form-group">
@@ -102,6 +104,9 @@
                 </div>
                 <input type="hidden" id="login-role" value="admin">
                 <button type="submit" class="btn-primary">Login</button>
+                <p class="help-text" style="margin-top: 1rem; font-size: 0.8rem; color: #888;">
+                    Forgot password? Run <code>python3 reset_password.py</code> in the server terminal.
+                </p>
             </form>
         </div>
     </div>
@@ -170,8 +175,8 @@
     <script>
         window.portalState = {
             isConfigured: {{ 'true' if is_configured else 'false' }},
-        viewerLocked: { { 'true' if viewer_locked else 'false' } },
-        isAdmin: { { 'true' if is_admin else 'false' } }
+        viewerLocked: {{ 'true' if viewer_locked else 'false' }},
+        isAdmin: {{ 'true' if is_admin else 'false' }}
         };
     </script>
 </body>

@@ -3,7 +3,7 @@
     font-family: 'NodestoCapsCondensed';
     src: url('/static/fonts/NodestoCapsCondensed.otf') format('opentype');
     font-style: normal;
-    drop-shadow(0 0 4px black);
+    /* drop-shadow is not valid in font-face */
 }
 
 @font-face {
@@ -393,19 +393,13 @@ a:hover {
 
 /* --- New Styles for Modals and Forms --- */
 
-.icon-btn {
-    background: none;
-    border: none;
-    padding: 5px;
-    cursor: pointer;
-    position: absolute;
-    right: 1rem;
-    top: 1rem;
-}
-
-.icon-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 50%;
+.nav-separator {
+    display: inline-block;
+    width: 2px;
+    height: 40px;
+    background-color: white;
+    margin: 0 10px;
+    vertical-align: middle;
 }
 
 .modal {
