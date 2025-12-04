@@ -1,29 +1,35 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <!-- Meta Information -->
     <meta charset="UTF-8">
     <title>Foundry Portal</title>
-    
+
     <!-- Favicon -->
     <link rel="icon" href="{{ url_for('static', filename='images/foundry-portal-icon-512.png') }}" type="image/png">
-    
+
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Signika:wght@400;700&display=swap" rel="stylesheet">
-    
+
     <!-- Main CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    
+
     <!-- Main JavaScript with shared_data_mode -->
-    <script id="main-script" data-shared-data-mode="{{ 'true' if shared_data_mode else 'false' }}" src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script id="main-script" data-shared-data-mode="{{ 'true' if shared_data_mode else 'false' }}"
+        src="{{ url_for('static', filename='js/main.js') }}"></script>
 </head>
+
 <body>
     <div class="container">
         <!-- Header -->
         <header class="header">
             <h1>Foundry Portal</h1>
+            <button id="admin-btn" class="icon-btn" title="Admin Settings">
+                <img src="/static/images/gear-icon.svg" alt="Settings" style="width: 24px; height: 24px;">
+            </button>
         </header>
-        
+
         <!-- Navigation Menu -->
         <nav id="menu">
             <button type="button" onclick="location.href='https://foundryvtt.com';">
@@ -33,7 +39,7 @@
                 <img class="fa-fake" src="/static/images/github-fa-fake.png" alt="GitHub Repository">
             </button>
         </nav>
-        
+
         <!-- Main Content -->
         <main class="main-content">
             <!-- Active Worlds Section -->
@@ -43,7 +49,7 @@
                     <!-- Dynamic world cards injected here -->
                 </div>
             </section>
-            
+
             <!-- Instance Status Section -->
             <section class="panel" id="instance-status">
                 <h2>Instances</h2>
@@ -57,12 +63,114 @@
                 </div>
             </section>
         </main>
-        
+
         <!-- Footer -->
         <footer class="footer">
             <p>Created by <a href="https://www.github.com/Daxiongmao87">Daxiongmao87</a></p>
             <p>Foundry Portal is not affiliated with Foundry Gaming LLC</p>
         </footer>
     </div>
+
+    <!-- Modals -->
+
+    <!-- Initialization Modal -->
+    <div id="init-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Welcome to Foundry Portal</h2>
+            <p>Please set an admin password to get started.</p>
+            <form id="init-form">
+                <div class="form-group">
+                    <label for="init-password">Admin Password:</label>
+                    <input type="password" id="init-password" required>
+                </div>
+                <button type="submit" class="btn-primary">Set Password</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2 id="login-title">Admin Login</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-password">Password:</label>
+                    <input type="password" id="login-password" required>
+                </div>
+                <input type="hidden" id="login-role" value="admin">
+                <button type="submit" class="btn-primary">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Config Modal -->
+    <div id="config-modal" class="modal" style="display: none;">
+        <div class="modal-content large">
+            <span class="close">&times;</span>
+            <h2>Configuration</h2>
+
+            <form id="config-form">
+                <div class="config-section">
+                    <h3>General Settings</h3>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="shared-data-mode"> Shared Data Mode
+                        </label>
+                        <p class="help-text">Enable if all instances share the same data folder.</p>
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <h3>Instances</h3>
+                    <div id="instances-container">
+                        <!-- Instance rows added here -->
+                    </div>
+                    <button type="button" id="add-instance-btn" class="btn-secondary">+ Add Instance</button>
+                </div>
+
+                <div class="config-section">
+                    <h3>Security</h3>
+                    <div class="form-group">
+                        <label for="new-admin-password">Update Admin Password:</label>
+                        <input type="password" id="new-admin-password" placeholder="Leave blank to keep current">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="new-viewer-password">Viewer Access Password:</label>
+                        <input type="password" id="new-viewer-password"
+                            placeholder="Leave blank to disable viewer password">
+                        <p class="help-text">If set, visitors must enter this password to view the portal.</p>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Save Configuration</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Viewer Lock Overlay -->
+    <div id="viewer-lock" class="overlay" style="display: none;">
+        <div class="modal-content">
+            <h2>Portal Locked</h2>
+            <p>Please enter the viewer password to access.</p>
+            <form id="viewer-form">
+                <div class="form-group">
+                    <input type="password" id="viewer-password" required placeholder="Password">
+                </div>
+                <button type="submit" class="btn-primary">Enter</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        window.portalState = {
+            isConfigured: {{ 'true' if is_configured else 'false' }},
+        viewerLocked: {{ 'true' if viewer_locked else 'false' }},
+        isAdmin: {{ 'true' if is_admin else 'false' }}
+        };
+    </script>
 </body>
+
 </html>

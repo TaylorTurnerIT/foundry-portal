@@ -1,195 +1,296 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Determine if shared_data_mode is enabled based on data attribute from the main script
-    const sharedDataMode = document.getElementById("main-script").dataset.sharedDataMode === 'true';
-    
-    /**
-     * Fetch the current statuses of all instances from the API.
-     */
-    function fetchInstanceStatuses() {
-        fetch('/api/instance-status')
-            .then(response => response.json())
-            .then(instances => {
-                updateActiveWorlds(instances);
-                updateInstanceStatuses(instances);
-            })
-            .catch(error => console.error('Error fetching instance statuses:', error));
+document.addEventListener('DOMContentLoaded', () => {
+    const sharedDataMode = document.getElementById('main-script').getAttribute('data-shared-data-mode') === 'true';
+    const state = window.portalState || {};
+
+    // --- Modal Elements ---
+    const initModal = document.getElementById('init-modal');
+    const loginModal = document.getElementById('login-modal');
+    const configModal = document.getElementById('config-modal');
+    const viewerLock = document.getElementById('viewer-lock');
+    const adminBtn = document.getElementById('admin-btn');
+    const closeBtns = document.querySelectorAll('.close');
+
+    // --- Initialization Flow ---
+    if (!state.isConfigured) {
+        initModal.style.display = 'block';
+    } else if (state.viewerLocked) {
+        viewerLock.style.display = 'block';
     }
 
-    /**
-     * Update the Active Worlds section with current active worlds.
-     * @param {Array} instances - List of instance objects with their statuses.
-     */
-    function updateActiveWorlds(instances) {
+    // --- Event Listeners ---
+
+    // Admin Button
+    if (adminBtn) {
+        adminBtn.addEventListener('click', () => {
+            if (state.isAdmin) {
+                openConfigModal();
+            } else {
+                openLoginModal();
+            }
+        });
+    }
+
+    // Close Modals
+    closeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.closest('.modal').style.display = 'none';
+        });
+    });
+
+    // Init Form
+    const initForm = document.getElementById('init-form');
+    if (initForm) {
+        initForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('init-password').value;
+            try {
+                const response = await fetch('/api/init', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ admin_password: password })
+                });
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    alert('Initialization failed');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Error initializing');
+            }
+        });
+    }
+
+    // Login Form
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('login-password').value;
+            const role = document.getElementById('login-role').value;
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password, role })
+                });
+
+                if (response.ok) {
+                    loginModal.style.display = 'none';
+                    if (role === 'admin') {
+                        state.isAdmin = true;
+                        openConfigModal();
+                    }
+                } else {
+                    alert('Invalid password');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Login error');
+            }
+        });
+    }
+
+    // Viewer Form
+    const viewerForm = document.getElementById('viewer-form');
+    if (viewerForm) {
+        viewerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('viewer-password').value;
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password, role: 'viewer' })
+                });
+
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    alert('Invalid password');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Login error');
+            }
+        });
+    }
+
+    // Config Form
+    const configForm = document.getElementById('config-form');
+    if (configForm) {
+        configForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = {
+                shared_data_mode: document.getElementById('shared-data-mode').checked,
+                instances: getInstancesFromDOM(),
+                new_admin_password: document.getElementById('new-admin-password').value,
+                new_viewer_password: document.getElementById('new-viewer-password').value
+            };
+
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                if (response.ok) {
+                    alert('Configuration saved!');
+                    configModal.style.display = 'none';
+                    location.reload();
+                } else {
+                    alert('Failed to save configuration');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Error saving configuration');
+            }
+        });
+    }
+
+    // Add Instance Button
+    const addInstanceBtn = document.getElementById('add-instance-btn');
+    if (addInstanceBtn) {
+        addInstanceBtn.addEventListener('click', () => {
+            addInstanceRow();
+        });
+    }
+
+    // --- Helper Functions ---
+
+    function openLoginModal() {
+        loginModal.style.display = 'block';
+        document.getElementById('login-password').value = '';
+        document.getElementById('login-password').focus();
+    }
+
+    async function openConfigModal() {
+        try {
+            const response = await fetch('/api/config');
+            if (response.ok) {
+                const config = await response.json();
+                populateConfigForm(config);
+                configModal.style.display = 'block';
+            } else {
+                // Session might have expired
+                state.isAdmin = false;
+                openLoginModal();
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function populateConfigForm(config) {
+        document.getElementById('shared-data-mode').checked = config.shared_data_mode;
+        const container = document.getElementById('instances-container');
+        container.innerHTML = '';
+        config.instances.forEach(inst => addInstanceRow(inst));
+
+        // Reset password fields
+        document.getElementById('new-admin-password').value = '';
+        document.getElementById('new-viewer-password').value = '';
+    }
+
+    function addInstanceRow(data = { name: '', url: '' }) {
+        const container = document.getElementById('instances-container');
+        const div = document.createElement('div');
+        div.className = 'instance-row form-group';
+        div.innerHTML = `
+            <input type="text" placeholder="Name" value="${data.name}" class="instance-name" required>
+            <input type="url" placeholder="URL" value="${data.url}" class="instance-url" required>
+            <button type="button" class="btn-danger remove-instance">&times;</button>
+        `;
+
+        div.querySelector('.remove-instance').addEventListener('click', () => {
+            div.remove();
+        });
+
+        container.appendChild(div);
+    }
+
+    function getInstancesFromDOM() {
+        const rows = document.querySelectorAll('.instance-row');
+        return Array.from(rows).map(row => ({
+            name: row.querySelector('.instance-name').value,
+            url: row.querySelector('.instance-url').value
+        }));
+    }
+
+    // --- Polling for Status (Existing Logic) ---
+    function fetchStatus() {
+        if (state.viewerLocked || !state.isConfigured) return;
+
+        fetch('/api/instance-status')
+            .then(response => response.json())
+            .then(data => {
+                updateDashboard(data);
+            })
+            .catch(error => console.error('Error fetching status:', error));
+    }
+
+    function updateDashboard(instances) {
         const worldsGallery = document.getElementById('worlds-gallery');
-        worldsGallery.innerHTML = ''; // Clear existing content
+        const instanceList = document.getElementById('instance-list');
+
+        worldsGallery.innerHTML = '';
+        instanceList.innerHTML = '';
+
+        let activeWorldsFound = false;
 
         instances.forEach(instance => {
+            // Update Instance List
+            const instanceCard = document.createElement('div');
+            instanceCard.className = `instance-card ${instance.status}`;
+            instanceCard.innerHTML = `
+                <div class="instance-header">
+                    <span class="status-dot"></span>
+                    <h3>${instance.name}</h3>
+                </div>
+                <p class="instance-url"><a href="${instance.url}" target="_blank">${instance.url}</a></p>
+            `;
+            instanceList.appendChild(instanceCard);
+
+            // Update Active Worlds
             if (instance.status === 'active' && instance.active_world) {
-                // Create world card element
+                activeWorldsFound = true;
                 const worldCard = document.createElement('div');
                 worldCard.className = 'world-card';
-                worldCard.style.backgroundImage = `url(${instance.active_world.background})`;
+                worldCard.style.backgroundImage = `url('${instance.url}${instance.active_world.background}')`;
                 worldCard.style.backgroundSize = 'cover';
                 worldCard.style.backgroundPosition = 'center';
 
-                // World name
                 const worldName = document.createElement('h3');
                 worldName.textContent = instance.active_world.name;
                 worldCard.appendChild(worldName);
 
-                // Player information
                 const playerInfo = document.createElement('p');
                 playerInfo.textContent = `Players: ${instance.active_world.players}`;
                 worldCard.appendChild(playerInfo);
 
-                // Hosting instance information
                 const instanceInfo = document.createElement('p');
                 instanceInfo.textContent = `Hosted on: ${instance.name}`;
                 worldCard.appendChild(instanceInfo);
 
-                // Redirect to instance URL on click
-                worldCard.addEventListener('click', function() {
-                    window.location.href = instance.url;
+                worldCard.addEventListener('click', () => {
+                    window.open(`${instance.url}/join`, '_blank');
                 });
 
                 worldsGallery.appendChild(worldCard);
             }
         });
 
-        // If shared_data_mode is enabled, add the "Activate World" button
-        if (sharedDataMode) {
-            const hasOnlineInstance = instances.some(instance => instance.status === 'online');
-
-            if (hasOnlineInstance) {
-                // Create "Activate World" card
-                const addNewCard = document.createElement('div');
-                addNewCard.className = 'world-card add-new';
-
-                const addNewTitle = document.createElement('h3');
-                addNewTitle.textContent = 'Activate World';
-                addNewCard.appendChild(addNewTitle);
-
-                const icon = document.createElement('h2');
-                icon.textContent = '+';
-                addNewCard.appendChild(icon);
-
-                // Redirect to an available instance on click
-                addNewCard.addEventListener('click', function() {
-                    const availableInstance = instances.find(inst => inst.status === 'online');
-                    if (availableInstance) {
-                        window.location.href = availableInstance.url;
-                    } else {
-                        alert('No available instances to activate a world.');
-                    }
-                });
-
-                worldsGallery.appendChild(addNewCard);
-            }
+        if (!activeWorldsFound) {
+            worldsGallery.innerHTML = '<p class="no-worlds">No active worlds found.</p>';
         }
     }
 
-    /**
-     * Fetch the background URL from a specific instance.
-     * @param {string} instanceUrl - The URL of the instance to fetch from.
-     * @returns {string|null} - The background URL or null if not found.
-     */
-    async function fetchBackgroundFromInstance(instanceUrl) {
-        try {
-            const response = await fetch(instanceUrl, { mode: 'no-cors' });
-            const htmlText = await response.text();
-
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(htmlText, 'text/html');
-
-            const bodyStyle = window.getComputedStyle(doc.body);
-            const backgroundUrl = bodyStyle.getPropertyValue('--background-url').slice(4, -1);
-
-            return backgroundUrl || null;
-        } catch (error) {
-            console.error(`Error fetching background from ${instanceUrl}:`, error);
-            return null;
-        }
+    // Initial fetch and interval
+    if (state.isConfigured && !state.viewerLocked) {
+        fetchStatus();
+        setInterval(fetchStatus, 5000);
     }
-
-    /**
-     * Update the Instances section with current instance statuses.
-     * @param {Array} instances - List of instance objects with their statuses.
-     */
-    function updateInstanceStatuses(instances) {
-        const instanceList = document.getElementById('instance-list');
-
-        // Get names of currently displayed instances
-        const existingInstances = [...instanceList.children].map(child => child.getAttribute('data-instance-name'));
-
-        instances.forEach(instance => {
-            if (!existingInstances.includes(instance.name)) {
-                // Create new instance card
-                const instanceCard = document.createElement('div');
-                instanceCard.className = 'instance-card';
-                instanceCard.setAttribute('data-instance-name', instance.name);
-
-                const instanceInfoContainer = document.createElement('div');
-                instanceInfoContainer.className = 'instance-info-container';
-
-                const instanceHeader = document.createElement('h3');
-
-                // Status indicator
-                const statusIndicator = document.createElement('span');
-                statusIndicator.className = `status-indicator ${instance.status}`;
-                statusIndicator.style.display = 'inline-block';
-                statusIndicator.style.marginRight = '5px';
-
-                instanceHeader.appendChild(statusIndicator);
-                instanceHeader.appendChild(document.createTextNode(instance.name));
-                instanceInfoContainer.appendChild(instanceHeader);
-
-                // Instance URL
-                const instanceUrlParagraph = document.createElement('p');
-                instanceUrlParagraph.textContent = instance.url;
-                instanceUrlParagraph.classList.add('instance-url');
-                instanceInfoContainer.appendChild(instanceUrlParagraph);
-
-                instanceCard.appendChild(instanceInfoContainer);
-
-                // Set background image if available
-                if (instance.background) {
-                    instanceCard.style.backgroundImage = `url(${instance.background})`;
-                    instanceCard.style.backgroundSize = 'cover';
-                    instanceCard.style.backgroundPosition = 'center';
-                }
-
-                // Redirect to instance URL on click
-                instanceCard.addEventListener('click', function() {
-                    window.location.href = instance.url;
-                });
-
-                instanceList.appendChild(instanceCard);
-            } else {
-                // Update existing instance card
-                const existingCard = document.querySelector(`[data-instance-name="${instance.name}"]`);
-                if (existingCard) {
-                    const statusIndicator = existingCard.querySelector('.status-indicator');
-                    statusIndicator.className = `status-indicator ${instance.status}`;
-
-                    if (instance.background) {
-                        existingCard.style.backgroundImage = `url(${instance.background})`;
-                    }
-                }
-            }
-        });
-
-        // Remove instance cards that no longer exist
-        const newInstanceNames = instances.map(inst => inst.name);
-        [...instanceList.children].forEach(child => {
-            if (!newInstanceNames.includes(child.getAttribute('data-instance-name'))) {
-                instanceList.removeChild(child);
-            }
-        });
-    }
-
-    // Initial fetch of instance statuses
-    fetchInstanceStatuses();
-
-    // Periodically update instance statuses every 5 seconds
-    setInterval(fetchInstanceStatuses, 5000);
 });

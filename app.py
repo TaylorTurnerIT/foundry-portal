@@ -1,110 +1,114 @@
-from flask import Flask, render_template, jsonify
+import os
 import yaml
+import re
+from functools import wraps
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
-from urllib.parse import urljoin
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Initialize the Flask application
 app = Flask(__name__)
+app.secret_key = os.urandom(24)  # Secret key for session management
 
 # Global cache to store instance data
 instance_data_cache = []
+CONFIG_FILE = 'config.yaml'
 
 def load_config():
     """
     Load the configuration from the 'config.yaml' file.
-    Ensures that 'shared_data_mode' is set, defaulting to False if not present.
-    
     Returns:
-        dict: Configuration dictionary containing shared_data_mode and instances.
+        dict: Configuration dictionary.
     """
-    with open('config.yaml', 'r') as file:
-        config = yaml.safe_load(file)
-    config['shared_data_mode'] = config.get('shared_data_mode', False)
-    return config
+    if not os.path.exists(CONFIG_FILE):
+        print(f"DEBUG: Config file {CONFIG_FILE} NOT found.")
+        return {}
+    with open(CONFIG_FILE, 'r') as file:
+        config = yaml.safe_load(file) or {}
+        print(f"DEBUG: Loaded config. Keys: {config.keys()}")
+        if 'admin_password_hash' in config:
+            print("DEBUG: admin_password_hash is present.")
+        else:
+            print("DEBUG: admin_password_hash is MISSING.")
+        return config
+
+def save_config(config):
+    """
+    Save the configuration to 'config.yaml'.
+    """
+    with open(CONFIG_FILE, 'w') as file:
+        yaml.dump(config, file)
 
 def check_instance_status(instance_url):
     """
     Check the status of a Foundry instance by navigating to its URL using Selenium.
-    Determines if the instance is offline, online, or active based on the current URL and page content.
-    
-    Args:
-        instance_url (str): The URL of the Foundry instance to check.
-    
-    Returns:
-        tuple: A tuple containing the status ('offline', 'online', 'active'), 
-               active_world (dict or None), and background_url (str or None).
+    Uses regex to parse player counts from the body text.
     """
-    # Configure Selenium Chrome options for headless browsing
     options = Options()
-    options.add_argument('--headless')  # Run browser in headless mode
-    options.add_argument('--no-sandbox')  # Bypass OS security model
-    options.add_argument('--disable-dev-shm-usage')  # Overcome limited resource problems
-    options.add_argument('--disable-gpu')  # Disable GPU usage
-    options.add_argument('window-size=1920x1080')  # Set window size
-    options.add_argument('--ignore-certificate-errors')  # Ignore SSL certificate errors
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_argument('window-size=1920x1080')
+    options.add_argument('--ignore-certificate-errors')
 
-    # Initialize the Chrome WebDriver with the specified options
     driver = webdriver.Chrome(options=options)
 
-    # Default status and data
     status = "offline"
     active_world = None
     background_url = None
 
     try:
-        # Navigate to the instance URL
         driver.get(instance_url)
 
-        # Check if the current URL indicates an authentication page
         if "/auth" in driver.current_url:
             status = "online"
-            # Execute JavaScript to retrieve the background URL from CSS variables
-            background_url = driver.execute_script("""
-                var background = getComputedStyle(document.body).getPropertyValue('--background-url').trim();
-                background = background.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
-                var link = document.createElement('a');
-                link.href = background;
-                return link.href;
-            """)
+            # Try to get background
+            try:
+                background_url = driver.execute_script("""
+                    var background = getComputedStyle(document.body).getPropertyValue('--background-url').trim();
+                    background = background.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
+                    return background;
+                """)
+            except:
+                pass
 
-        # Check if the current URL indicates an active world
         elif "/join" in driver.current_url:
-            # Wait until the page title contains a specific condition (empty string here)
             WebDriverWait(driver, 10).until(EC.title_contains(""))
             world_name = driver.title
 
             if world_name:
-                # Retrieve the background URL using JavaScript
-                background_url = driver.execute_script("""
-                    var background = getComputedStyle(document.body).getPropertyValue('--background-url').trim();
-                    background = background.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
-                    var link = document.createElement('a');
-                    link.href = background;
-                    return link.href;
-                """)
-
+                # Try to get background
                 try:
-                    # Wait until the player count elements are present on the page
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, '.current-players .count'))
-                    )
-                    # Extract current and maximum player counts
-                    current_players = driver.find_elements(By.CSS_SELECTOR, '.current-players .count')[0].text
-                    max_players = driver.find_elements(By.CSS_SELECTOR, '.current-players .count')[1].text
-                    player_info = f"{current_players} / {max_players}"
-                except (IndexError, TimeoutException):
-                    # Handle cases where player information is unavailable
+                    background_url = driver.execute_script("""
+                        var background = getComputedStyle(document.body).getPropertyValue('--background-url').trim();
+                        background = background.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
+                        return background;
+                    """)
+                except:
+                    pass
+
+                # Get player count using regex on body text
+                try:
+                    body_text = driver.find_element(By.TAG_NAME, "body").text
+                    # Look for "Current Players X / Y" pattern
+                    # Adjust regex to be flexible with whitespace
+                    match = re.search(r"Current Players\s*(\d+)\s*/\s*(\d+)", body_text)
+                    if match:
+                        player_info = f"{match.group(1)} / {match.group(2)}"
+                    else:
+                        player_info = "Unknown / Unknown"
+                except:
                     player_info = "Unknown / Unknown"
 
-                if world_name and background_url:
-                    # Populate the active_world dictionary with relevant information
+                if world_name:
                     active_world = {
                         'name': world_name,
                         'background': background_url,
@@ -112,93 +116,191 @@ def check_instance_status(instance_url):
                     }
                     status = "active"
     except (TimeoutException, WebDriverException):
-        # In case of any Selenium-related exceptions, mark the instance as offline
         status = "offline"
     finally:
-        # Ensure the WebDriver is properly closed
         driver.quit()
 
     return status, active_world, background_url
 
 def initialize_instance_data():
-    """
-    Initialize the instance data cache with default values from the configuration.
-    Sets all instances to 'offline' initially with default background images.
-    """
     global instance_data_cache
     config = load_config()
     instances = []
 
-    for instance in config['instances']:
-        instance_data = {
-            'name': instance['name'],
-            'url': instance['url'],
-            'status': 'offline',  # Default status
-            'active_world': None,  # No active world initially
-            'background': '/static/images/background.jpg'  # Default background image
-        }
-        instances.append(instance_data)
+    if 'instances' in config:
+        for instance in config['instances']:
+            instance_data = {
+                'name': instance['name'],
+                'url': instance['url'],
+                'status': 'offline',
+                'active_world': None,
+                'background': '/static/images/background.jpg'
+            }
+            instances.append(instance_data)
 
     instance_data_cache = instances
 
 def update_instance_statuses():
-    """
-    Update the status of all configured instances by checking each one's current state.
-    Refreshes the global instance_data_cache with the latest information.
-    """
     global instance_data_cache
     config = load_config()
     instances = []
 
-    for instance in config['instances']:
-        # Check the status of each instance
-        status, active_world, background_url = check_instance_status(instance['url'])
-        instance_data = {
-            'name': instance['name'],
-            'url': instance['url'],
-            'status': status,
-            'active_world': active_world,
-            'background': background_url if background_url else '/static/images/background.jpg'
-        }
-        instances.append(instance_data)
+    if 'instances' in config:
+        for instance in config['instances']:
+            status, active_world, background_url = check_instance_status(instance['url'])
+            instance_data = {
+                'name': instance['name'],
+                'url': instance['url'],
+                'status': status,
+                'active_world': active_world,
+                'background': background_url if background_url else '/static/images/background.jpg'
+            }
+            instances.append(instance_data)
 
-    # Update the global cache with the latest instance data
     instance_data_cache = instances
     print("Instance statuses updated.")
 
+# --- Authentication Decorators ---
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('admin_logged_in'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+def viewer_auth_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        config = load_config()
+        # If viewer password is set and user is not logged in as viewer or admin
+        if config.get('viewer_password_hash') and not (session.get('viewer_logged_in') or session.get('admin_logged_in')):
+             # For API calls, return 401. For page loads, we might handle differently in frontend, 
+             # but here we just check session.
+             # Actually, for the main page, we pass a flag to the template.
+             pass 
+        return f(*args, **kwargs)
+    return decorated_function
+
+# --- Routes ---
+
 @app.route('/api/instance-status')
 def api_instance_status():
-    """
-    API endpoint to retrieve the current status of all instances.
-    
-    Returns:
-        Response: JSON response containing the instance data cache.
-    """
     return jsonify(instance_data_cache)
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    password = data.get('password')
+    role = data.get('role', 'admin') # 'admin' or 'viewer'
+    config = load_config()
+
+    if role == 'admin':
+        if config.get('admin_password_hash') and check_password_hash(config['admin_password_hash'], password):
+            session['admin_logged_in'] = True
+            return jsonify({'success': True})
+    elif role == 'viewer':
+        if config.get('viewer_password_hash') and check_password_hash(config['viewer_password_hash'], password):
+            session['viewer_logged_in'] = True
+            return jsonify({'success': True})
+    
+    return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/api/config', methods=['GET', 'POST'])
+@admin_required
+def handle_config():
+    if request.method == 'GET':
+        config = load_config()
+        # Don't send hashes back
+        safe_config = {
+            'shared_data_mode': config.get('shared_data_mode', False),
+            'instances': config.get('instances', []),
+            'viewer_access_enabled': bool(config.get('viewer_password_hash'))
+        }
+        return jsonify(safe_config)
+    
+    if request.method == 'POST':
+        new_data = request.json
+        config = load_config()
+        
+        # Update fields
+        if 'shared_data_mode' in new_data:
+            config['shared_data_mode'] = new_data['shared_data_mode']
+        if 'instances' in new_data:
+            config['instances'] = new_data['instances']
+        
+        # Handle password updates
+        if 'new_admin_password' in new_data and new_data['new_admin_password']:
+            config['admin_password_hash'] = generate_password_hash(new_data['new_admin_password'])
+            
+        if 'new_viewer_password' in new_data:
+            if new_data['new_viewer_password']:
+                config['viewer_password_hash'] = generate_password_hash(new_data['new_viewer_password'])
+            else:
+                # If empty, disable viewer access (remove hash)
+                config.pop('viewer_password_hash', None)
+
+        save_config(config)
+        # Trigger update immediately
+        update_instance_statuses()
+        return jsonify({'success': True})
+
+@app.route('/api/init', methods=['POST'])
+def init_config():
+    """Endpoint for initial setup if no config exists."""
+    if os.path.exists(CONFIG_FILE) and load_config().get('admin_password_hash'):
+         return jsonify({'error': 'Already configured'}), 403
+    
+    data = request.json
+    password = data.get('admin_password')
+    if not password:
+        return jsonify({'error': 'Password required'}), 400
+        
+    config = {
+        'admin_password_hash': generate_password_hash(password),
+        'shared_data_mode': False,
+        'instances': []
+    }
+    save_config(config)
+    return jsonify({'success': True})
 
 @app.route('/')
 def home():
-    """
-    Home route that renders the main page with instance data and shared data mode.
-    
-    Returns:
-        Response: Rendered HTML template for the homepage.
-    """
     config = load_config()
-    return render_template('index.html', instances=instance_data_cache, shared_data_mode=config['shared_data_mode'])
+    
+    # Check if configured
+    is_configured = bool(config.get('admin_password_hash'))
+    print(f"DEBUG: home route - is_configured: {is_configured}")
+    
+    # Check viewer access
+    viewer_locked = False
+    if is_configured and config.get('viewer_password_hash'):
+        if not (session.get('viewer_logged_in') or session.get('admin_logged_in')):
+            viewer_locked = True
+    
+    print(f"DEBUG: home route - viewer_locked: {viewer_locked}")
+
+    return render_template('index.html', 
+                           instances=instance_data_cache, 
+                           shared_data_mode=config.get('shared_data_mode', False),
+                           is_configured=is_configured,
+                           viewer_locked=viewer_locked,
+                           is_admin=session.get('admin_logged_in', False))
 
 # Initialize the background scheduler
 scheduler = BackgroundScheduler()
-# Schedule the 'update_instance_statuses' function to run every 10 seconds
 scheduler.add_job(func=update_instance_statuses, trigger="interval", seconds=10)
 scheduler.start()
 
-# Ensure that the scheduler shuts down gracefully when the application exits
 atexit.register(lambda: scheduler.shutdown())
 
 if __name__ == '__main__':
-    # Initialize instance data and perform an initial status update before starting the server
     initialize_instance_data()
     update_instance_statuses()
-    # Run the Flask development server with debug mode enabled
     app.run(host='0.0.0.0', port=5000)
