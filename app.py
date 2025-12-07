@@ -67,6 +67,7 @@ def save_worlds(worlds_data):
         with open(temp_file, 'w') as file:
             json.dump(worlds_data, file, indent=2)
         os.replace(temp_file, WORLDS_FILE)  # Atomic on POSIX
+        print(f"DEBUG: Saved {len(worlds_data.get('worlds', {}))} worlds to {WORLDS_FILE}")
     except IOError as e:
         print(f"ERROR: Could not save {WORLDS_FILE}: {e}")
         if os.path.exists(temp_file):
@@ -178,9 +179,10 @@ def check_instance_status(instance_url):
             except TimeoutException:
                 print("DEBUG SCRAPER: Timeout waiting for current-players element")
 
-            world_name = driver.title
+            world_name = driver.title.strip()
 
-            if world_name:
+            # Validate world name - must be non-empty and not a generic loading message
+            if world_name and len(world_name) > 0 and world_name not in ['Foundry Virtual Tabletop', 'Loading...', '']:
                 # Try to get background
                 try:
                     background_url = driver.execute_script("""
@@ -214,13 +216,16 @@ def check_instance_status(instance_url):
                     player_info = "Unknown / Unknown"
                     print(f"DEBUG SCRAPER: Exception getting player count: {e}")
 
-                if world_name:
-                    active_world = {
-                        'name': world_name,
-                        'background': background_url,
-                        'players': player_info
-                    }
-                    status = "active"
+                # Create active world entry
+                active_world = {
+                    'name': world_name,
+                    'background': background_url,
+                    'players': player_info
+                }
+                status = "active"
+                print(f"DEBUG SCRAPER: Valid world detected: {world_name}")
+            else:
+                print(f"DEBUG SCRAPER: Skipping invalid/incomplete world name: '{world_name}'")
         # Check for /game (player is in a game)
         elif "/game" in driver.current_url:
             print(f"DEBUG SCRAPER: Matched /game condition")

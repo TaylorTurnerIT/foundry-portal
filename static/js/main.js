@@ -340,6 +340,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateWorldsGallery(worlds) {
         const worldsGallery = document.getElementById('worlds-gallery');
+
+        // Check if data has actually changed to avoid unnecessary re-renders
+        const currentWorldsJson = JSON.stringify(worlds);
+        if (window.lastWorldsJson === currentWorldsJson) {
+            return; // No changes, skip update
+        }
+        window.lastWorldsJson = currentWorldsJson;
+
         worldsGallery.innerHTML = '';
 
         if (worlds.length === 0) {
