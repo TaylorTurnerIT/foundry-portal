@@ -295,7 +295,7 @@ def home():
 
 # Initialize the background scheduler
 scheduler = BackgroundScheduler()
-scheduler.add_job(func=update_instance_statuses, trigger="interval", seconds=10)
+scheduler.add_job(func=update_instance_statuses, trigger="interval", seconds=60)
 scheduler.start()
 
 atexit.register(lambda: scheduler.shutdown())
