@@ -302,5 +302,5 @@ atexit.register(lambda: scheduler.shutdown())
 
 if __name__ == '__main__':
     initialize_instance_data()
-    update_instance_statuses()
+    # update_instance_statuses()
     app.run(host='0.0.0.0', port=5000)
