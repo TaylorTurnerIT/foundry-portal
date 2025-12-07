@@ -68,7 +68,10 @@ def check_instance_status(instance_url):
     try:
         driver.get(instance_url)
 
-        if "/auth" in driver.current_url:
+        # DEBUG: Print what the scraper actually sees
+        print(f"DEBUG SCRAPER: URL={driver.current_url}, Title={driver.title}")
+
+        if "/join" in driver.current_url or "/game" in driver.current_url:
             status = "online"
             # Try to get background
             try:
@@ -115,7 +118,20 @@ def check_instance_status(instance_url):
                         'players': player_info
                     }
                     status = "active"
-    except (TimeoutException, WebDriverException):
+        elif "Foundry Virtual Tabletop" in driver.title or "/auth" in driver.current_url or "/setup" in driver.current_url:
+            status = "online"
+            
+            # Try to get background (same as before)
+            try:
+                background_url = driver.execute_script("""
+                    var background = getComputedStyle(document.body).getPropertyValue('--background-url').trim();
+                    background = background.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
+                    return background;
+                """)
+            except:
+                pass
+    except (TimeoutException, WebDriverException) as e:
+        print(f"DEBUG SCRAPER ERROR: {e}")
         status = "offline"
     finally:
         driver.quit()
