@@ -259,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
             instanceCard.innerHTML = `
                 <div class="instance-info-container">
                     <div class="instance-header">
-                        <span class="status-dot"></span>
+                        <span class="status-indicator ${instance.status}"></span>
                         <h3>${instance.name}</h3>
                     </div>
                     <p class="instance-url"><a href="${instance.url}" target="_blank">${instance.url}</a></p>
