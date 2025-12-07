@@ -87,19 +87,25 @@ def check_instance_status(instance_url):
                 except:
                     pass
 
-                # Get player count using regex on body text
+                # Get player count by querying the specific HTML elements
                 try:
-                    body_text = driver.find_element(By.TAG_NAME, "body").text
-                    print(f"DEBUG SCRAPER BODY TEXT: {body_text[:500]}")  # Print first 500 chars
-                    # Look for "Current Players X / Y" pattern
-                    # Adjust regex to be flexible with whitespace
-                    match = re.search(r"(?:Current )?Players[:\s]*(\d+)\s*/\s*(\d+)", body_text, re.IGNORECASE)
-                    if match:
-                        player_info = f"{match.group(1)} / {match.group(2)}"
-                        print(f"DEBUG SCRAPER: Found player info: {player_info}")
+                    count_elements = driver.find_elements(By.CSS_SELECTOR, ".current-players .count")
+                    if len(count_elements) >= 2:
+                        current = count_elements[0].text
+                        max_players = count_elements[1].text
+                        player_info = f"{current} / {max_players}"
+                        print(f"DEBUG SCRAPER: Found player info from elements: {player_info}")
                     else:
-                        player_info = "Unknown / Unknown"
-                        print(f"DEBUG SCRAPER: No player match found in body text")
+                        # Fallback to regex on body text
+                        body_text = driver.find_element(By.TAG_NAME, "body").text
+                        # Account for newlines and whitespace between elements
+                        match = re.search(r"Current Players\s*(\d+)\s*/\s*(\d+)", body_text, re.DOTALL)
+                        if match:
+                            player_info = f"{match.group(1)} / {match.group(2)}"
+                            print(f"DEBUG SCRAPER: Found player info from text: {player_info}")
+                        else:
+                            player_info = "Unknown / Unknown"
+                            print(f"DEBUG SCRAPER: No player match found")
                 except Exception as e:
                     player_info = "Unknown / Unknown"
                     print(f"DEBUG SCRAPER: Exception getting player count: {e}")
