@@ -73,7 +73,14 @@ def check_instance_status(instance_url):
 
         # Check for /join first (active world)
         if "/join" in driver.current_url:
-            WebDriverWait(driver, 10).until(EC.title_contains(""))
+            # Wait for the page to load - check for the current-players element
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "current-players"))
+                )
+            except TimeoutException:
+                print("DEBUG SCRAPER: Timeout waiting for current-players element")
+
             world_name = driver.title
 
             if world_name:
