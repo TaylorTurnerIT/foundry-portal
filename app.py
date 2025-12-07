@@ -71,19 +71,8 @@ def check_instance_status(instance_url):
         # DEBUG: Print what the scraper actually sees
         print(f"DEBUG SCRAPER: URL={driver.current_url}, Title={driver.title}")
 
-        if "/join" in driver.current_url or "/game" in driver.current_url:
-            status = "online"
-            # Try to get background
-            try:
-                background_url = driver.execute_script("""
-                    var background = getComputedStyle(document.body).getPropertyValue('--background-url').trim();
-                    background = background.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
-                    return background;
-                """)
-            except:
-                pass
-
-        elif "/join" in driver.current_url:
+        # Check for /join first (active world)
+        if "/join" in driver.current_url:
             WebDriverWait(driver, 10).until(EC.title_contains(""))
             world_name = driver.title
 
@@ -118,6 +107,18 @@ def check_instance_status(instance_url):
                         'players': player_info
                     }
                     status = "active"
+        # Check for /game (player is in a game)
+        elif "/game" in driver.current_url:
+            status = "online"
+            # Try to get background
+            try:
+                background_url = driver.execute_script("""
+                    var background = getComputedStyle(document.body).getPropertyValue('--background-url').trim();
+                    background = background.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
+                    return background;
+                """)
+            except:
+                pass
         elif "Foundry Virtual Tabletop" in driver.title or "/auth" in driver.current_url or "/setup" in driver.current_url:
             status = "online"
             
