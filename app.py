@@ -70,9 +70,11 @@ def check_instance_status(instance_url):
 
         # DEBUG: Print what the scraper actually sees
         print(f"DEBUG SCRAPER: URL={driver.current_url}, Title={driver.title}")
+        print(f"DEBUG SCRAPER: Checking conditions...")
 
         # Check for /join first (active world)
         if "/join" in driver.current_url:
+            print(f"DEBUG SCRAPER: Matched /join condition")
             # Wait for the page to load - check for the current-players element
             try:
                 WebDriverWait(driver, 10).until(
@@ -126,6 +128,7 @@ def check_instance_status(instance_url):
                     status = "active"
         # Check for /game (player is in a game)
         elif "/game" in driver.current_url:
+            print(f"DEBUG SCRAPER: Matched /game condition")
             status = "online"
             # Try to get background
             try:
@@ -137,6 +140,7 @@ def check_instance_status(instance_url):
             except:
                 pass
         elif "Foundry Virtual Tabletop" in driver.title or "/auth" in driver.current_url or "/setup" in driver.current_url:
+            print(f"DEBUG SCRAPER: Matched online condition (title/auth/setup)")
             status = "online"
             
             # Try to get background (same as before)
@@ -154,6 +158,7 @@ def check_instance_status(instance_url):
     finally:
         driver.quit()
 
+    print(f"DEBUG SCRAPER: Final status={status}, active_world={active_world}")
     return status, active_world, background_url
 
 def initialize_instance_data():
