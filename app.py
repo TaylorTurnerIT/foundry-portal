@@ -295,12 +295,11 @@ def home():
 
 # Initialize the background scheduler
 scheduler = BackgroundScheduler()
-scheduler.add_job(func=update_instance_statuses, trigger="interval", seconds=60)
+scheduler.add_job(func=update_instance_statuses, trigger="interval", seconds=10)
 scheduler.start()
 
 atexit.register(lambda: scheduler.shutdown())
 
 if __name__ == '__main__':
     initialize_instance_data()
-    # update_instance_statuses()
     app.run(host='0.0.0.0', port=5000)
