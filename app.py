@@ -90,15 +90,19 @@ def check_instance_status(instance_url):
                 # Get player count using regex on body text
                 try:
                     body_text = driver.find_element(By.TAG_NAME, "body").text
+                    print(f"DEBUG SCRAPER BODY TEXT: {body_text[:500]}")  # Print first 500 chars
                     # Look for "Current Players X / Y" pattern
                     # Adjust regex to be flexible with whitespace
-                    match = re.search(r"Current Players\s*(\d+)\s*/\s*(\d+)", body_text)
+                    match = re.search(r"(?:Current )?Players[:\s]*(\d+)\s*/\s*(\d+)", body_text, re.IGNORECASE)
                     if match:
                         player_info = f"{match.group(1)} / {match.group(2)}"
+                        print(f"DEBUG SCRAPER: Found player info: {player_info}")
                     else:
                         player_info = "Unknown / Unknown"
-                except:
+                        print(f"DEBUG SCRAPER: No player match found in body text")
+                except Exception as e:
                     player_info = "Unknown / Unknown"
+                    print(f"DEBUG SCRAPER: Exception getting player count: {e}")
 
                 if world_name:
                     active_world = {
