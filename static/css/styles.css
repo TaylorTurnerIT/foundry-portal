@@ -170,15 +170,64 @@ h2 {
     mask-image: linear-gradient(270deg, transparent 0%, black 100%);
 }
 
+.worlds-controls {
+    padding: 0 1.5rem;
+    margin-bottom: 1rem;
+}
+
+#world-search {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    border: 1px solid #3a94ee;
+    border-radius: 4px;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: #e8eff7;
+    font-family: 'Signika', sans-serif;
+}
+
+#world-search::placeholder {
+    color: #888;
+}
+
+#world-search:focus {
+    outline: none;
+    border-color: #5ab4ff;
+    box-shadow: 0 0 8px rgba(58, 148, 238, 0.5);
+}
+
 .worlds-gallery {
     white-space: nowrap;
     display: flex;
     flex-wrap: wrap;
     padding: 1.5rem;
     gap: 20px;
+    max-height: 600px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #3a94ee rgba(0, 0, 0, 0.3);
+}
+
+.worlds-gallery::-webkit-scrollbar {
+    width: 8px;
+}
+
+.worlds-gallery::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+}
+
+.worlds-gallery::-webkit-scrollbar-thumb {
+    background: #3a94ee;
+    border-radius: 4px;
+}
+
+.worlds-gallery::-webkit-scrollbar-thumb:hover {
+    background: #5ab4ff;
 }
 
 .world-card {
+    position: relative;
     background-color: black;
     border-radius: 2px;
     height: 200px;
@@ -186,7 +235,7 @@ h2 {
     /* 3 items per row */
     box-sizing: border-box;
     box-shadow: 0 0 10px #000;
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
     background-size: cover;
     background-position: center;
 }
@@ -228,6 +277,149 @@ a:hover {
     color: white;
     text-shadow: 1px 1px 4px black;
     text-align: left;
+}
+
+/* World card states */
+.world-card.active {
+    cursor: pointer;
+}
+
+.world-card.idle {
+    opacity: 0.8;
+    filter: grayscale(20%);
+}
+
+.world-card.offline {
+    opacity: 0.6;
+    filter: grayscale(40%);
+}
+
+.world-card.idle,
+.world-card.offline {
+    cursor: default;
+}
+
+.world-card.active:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 15px #000;
+    border: 1px solid #3a94ee;
+}
+
+.world-card.idle:hover,
+.world-card.offline:hover {
+    transform: none;
+    cursor: default;
+}
+
+/* World status indicator */
+.world-status {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
+    z-index: 10;
+    cursor: help;
+}
+
+.world-status.active {
+    background-color: #00ff00;
+    box-shadow: 0 0 10px #00ff00;
+}
+
+.world-status.idle {
+    background-color: #ffaa00;
+    box-shadow: 0 0 10px #ffaa00;
+}
+
+.world-status.offline {
+    background-color: #ff4444;
+    box-shadow: 0 0 10px #ff4444;
+}
+
+/* Play icon */
+.world-card .play-icon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 3.5rem;
+    color: rgba(255, 255, 255, 0.9);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    text-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+    z-index: 5;
+}
+
+.world-card.active:hover .play-icon {
+    opacity: 1;
+}
+
+/* World info container */
+.world-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem;
+    background: linear-gradient(transparent 0%, rgba(0, 0, 0, 0.85) 30%, rgba(0, 0, 0, 0.95) 100%);
+}
+
+.world-info h3 {
+    font-family: 'Signika', sans-serif;
+    margin: 0 0 0.5rem 0;
+    color: #e8eff7;
+    font-size: 1.25em;
+    text-shadow: 2px 2px 4px black;
+}
+
+.world-info p {
+    margin: 0.25rem 0;
+    color: #e8eff7;
+    font-size: 0.9rem;
+    text-shadow: 1px 1px 3px black;
+}
+
+.world-info .world-instance {
+    color: #aaa;
+    font-size: 0.85rem;
+}
+
+.world-info .world-time {
+    color: #888;
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+.world-info .world-players {
+    color: #5ab4ff;
+    font-weight: bold;
+}
+
+/* Admin delete button */
+.delete-world {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: rgba(255, 68, 68, 0.8);
+    color: white;
+    border: none;
+    font-size: 18px;
+    line-height: 20px;
+    cursor: pointer;
+    z-index: 15;
+    transition: background-color 0.2s;
+    padding: 0;
+}
+
+.delete-world:hover {
+    background-color: rgba(255, 68, 68, 1);
 }
 
 .world-card:hover {

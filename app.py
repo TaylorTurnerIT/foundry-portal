@@ -1,6 +1,8 @@
 import os
 import yaml
 import re
+import json
+from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from selenium import webdriver
@@ -20,6 +22,7 @@ app.secret_key = os.urandom(24)  # Secret key for session management
 # Global cache to store instance data
 instance_data_cache = []
 CONFIG_FILE = 'config.yaml'
+WORLDS_FILE = 'worlds.json'
 
 def load_config():
     """
@@ -45,6 +48,98 @@ def save_config(config):
     """
     with open(CONFIG_FILE, 'w') as file:
         yaml.dump(config, file)
+
+def load_worlds():
+    """Load world history from worlds.json file."""
+    if not os.path.exists(WORLDS_FILE):
+        return {"worlds": {}, "schema_version": 1}
+    try:
+        with open(WORLDS_FILE, 'r') as file:
+            return json.load(file)
+    except (json.JSONDecodeError, IOError):
+        print(f"ERROR: Could not load {WORLDS_FILE}, returning empty data")
+        return {"worlds": {}, "schema_version": 1}
+
+def save_worlds(worlds_data):
+    """Save world history to worlds.json file with atomic write."""
+    temp_file = WORLDS_FILE + '.tmp'
+    try:
+        with open(temp_file, 'w') as file:
+            json.dump(worlds_data, file, indent=2)
+        os.replace(temp_file, WORLDS_FILE)  # Atomic on POSIX
+    except IOError as e:
+        print(f"ERROR: Could not save {WORLDS_FILE}: {e}")
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+def update_world_statuses(instances):
+    """Update world statuses based on current instance states."""
+    worlds_data = load_worlds()
+    worlds = worlds_data.get("worlds", {})
+    now = datetime.utcnow().isoformat() + 'Z'
+
+    # First, mark all worlds as offline
+    for world in worlds.values():
+        world['status'] = 'offline'
+
+    # Then update based on current instance states
+    for instance in instances:
+        instance_name = instance['name']
+        instance_url = instance['url']
+        instance_status = instance['status']
+
+        if instance_status == 'active' and instance.get('active_world'):
+            # World is running
+            active_world = instance['active_world']
+            world_key = f"{instance_name}::{active_world['name']}"
+
+            if world_key in worlds:
+                # Update existing world
+                world = worlds[world_key]
+                world['last_seen'] = now
+                world['status'] = 'active'
+                world['times_seen'] = world.get('times_seen', 0) + 1
+                if active_world.get('background'):
+                    world['cached_background_url'] = active_world['background']
+            else:
+                # Create new world entry
+                worlds[world_key] = {
+                    'name': active_world['name'],
+                    'instance_name': instance_name,
+                    'instance_url': instance_url,
+                    'first_seen': now,
+                    'last_seen': now,
+                    'status': 'active',
+                    'cached_background_url': active_world.get('background'),
+                    'times_seen': 1
+                }
+        else:
+            # Instance is online or offline, mark any of its worlds as idle/offline
+            for world_key, world in worlds.items():
+                if world['instance_name'] == instance_name:
+                    if instance_status == 'online':
+                        world['status'] = 'idle'
+                    else:
+                        world['status'] = 'offline'
+
+    worlds_data['worlds'] = worlds
+    save_worlds(worlds_data)
+
+def get_all_worlds_sorted():
+    """Get all worlds sorted by status (active, idle, offline) then by last_seen desc."""
+    worlds_data = load_worlds()
+    worlds_list = list(worlds_data.get("worlds", {}).values())
+
+    # Define sort priority: active=0, idle=1, offline=2
+    def get_sort_key(world):
+        status_priority = {'active': 0, 'idle': 1, 'offline': 2}
+        return (
+            status_priority.get(world.get('status', 'offline'), 2),
+            -datetime.fromisoformat(world.get('last_seen', '1970-01-01T00:00:00Z').replace('Z', '+00:00')).timestamp()
+        )
+
+    worlds_list.sort(key=get_sort_key)
+    return worlds_list
 
 def check_instance_status(instance_url):
     """
@@ -197,6 +292,10 @@ def update_instance_statuses():
             instances.append(instance_data)
 
     instance_data_cache = instances
+
+    # Update world history based on current instance states
+    update_world_statuses(instances)
+
     print("Instance statuses updated.")
 
 # --- Authentication Decorators ---
@@ -227,6 +326,35 @@ def viewer_auth_required(f):
 @app.route('/api/instance-status')
 def api_instance_status():
     return jsonify(instance_data_cache)
+
+@app.route('/api/worlds')
+def api_worlds():
+    """Return all worlds (active and historical) sorted by relevance."""
+    worlds = get_all_worlds_sorted()
+    return jsonify(worlds)
+
+@app.route('/api/worlds/<path:world_key>', methods=['DELETE'])
+@admin_required
+def delete_world(world_key):
+    """Delete a single world from history."""
+    worlds_data = load_worlds()
+    worlds = worlds_data.get("worlds", {})
+
+    if world_key in worlds:
+        del worlds[world_key]
+        worlds_data['worlds'] = worlds
+        save_worlds(worlds_data)
+        return jsonify({'success': True})
+    else:
+        return jsonify({'success': False, 'error': 'World not found'}), 404
+
+@app.route('/api/worlds', methods=['DELETE'])
+@admin_required
+def clear_worlds():
+    """Clear all world history."""
+    worlds_data = {"worlds": {}, "schema_version": 1}
+    save_worlds(worlds_data)
+    return jsonify({'success': True})
 
 @app.route('/api/login', methods=['POST'])
 def login():

@@ -233,13 +233,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateDashboard(instances) {
-        const worldsGallery = document.getElementById('worlds-gallery');
         const instanceList = document.getElementById('instance-list');
-
-        worldsGallery.innerHTML = '';
         instanceList.innerHTML = '';
 
-        let activeWorldsFound = false;
+        // Store instances for world card click handling
+        window.instanceCache = instances;
 
         instances.forEach(instance => {
             // Update Instance List
@@ -266,47 +264,208 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             instanceList.appendChild(instanceCard);
+        });
+    }
 
-            // Update Active Worlds
-            if (instance.status === 'active' && instance.active_world) {
-                activeWorldsFound = true;
-                const worldCard = document.createElement('div');
-                worldCard.className = 'world-card';
-                const backgroundUrl = instance.active_world.background.startsWith('/')
-                    ? new URL(instance.url).origin + instance.active_world.background
-                    : instance.url + instance.active_world.background;
-                worldCard.style.backgroundImage = `url('${backgroundUrl}')`;
-                worldCard.style.backgroundSize = 'cover';
-                worldCard.style.backgroundPosition = 'center';
+    // --- Worlds Management ---
 
-                const worldName = document.createElement('h3');
-                worldName.textContent = instance.active_world.name;
-                worldCard.appendChild(worldName);
+    function fetchWorlds() {
+        if (state.viewerLocked || !state.isConfigured) return;
 
-                const playerInfo = document.createElement('p');
-                playerInfo.textContent = `Players: ${instance.active_world.players}`;
-                worldCard.appendChild(playerInfo);
+        fetch('/api/worlds')
+            .then(response => response.json())
+            .then(worlds => {
+                window.allWorlds = worlds;  // Store for search filtering
+                updateWorldsGallery(worlds);
+            })
+            .catch(error => console.error('Error fetching worlds:', error));
+    }
 
-                const instanceInfo = document.createElement('p');
-                instanceInfo.textContent = `Hosted on: ${instance.name}`;
-                worldCard.appendChild(instanceInfo);
+    function formatRelativeTime(isoString, isActive) {
+        if (isActive) return 'now';
+
+        const date = new Date(isoString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        const diffWeeks = Math.floor(diffDays / 7);
+        const diffMonths = Math.floor(diffDays / 30);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+        if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+        if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+        if (diffDays < 30) return `${diffWeeks} week${diffWeeks !== 1 ? 's' : ''} ago`;
+        return `${diffMonths} month${diffMonths !== 1 ? 's' : ''} ago`;
+    }
+
+    function loadWorldBackground(card, cachedUrl, instanceUrl) {
+        if (!cachedUrl) {
+            card.style.backgroundImage = 'url(/static/images/background.jpg)';
+            return;
+        }
+
+        // Resolve URL
+        let fullUrl;
+        if (cachedUrl.startsWith('http')) {
+            fullUrl = cachedUrl;
+        } else if (cachedUrl.startsWith('/')) {
+            fullUrl = new URL(instanceUrl).origin + cachedUrl;
+        } else {
+            fullUrl = instanceUrl + '/' + cachedUrl;
+        }
+
+        // Try to load the image
+        const img = new Image();
+        img.onload = () => {
+            card.style.backgroundImage = `url('${fullUrl}')`;
+        };
+        img.onerror = () => {
+            // Fallback to placeholder
+            card.style.backgroundImage = 'url(/static/images/background.jpg)';
+        };
+        img.src = fullUrl;
+    }
+
+    function getStatusTooltip(status) {
+        const tooltips = {
+            'active': 'World is currently running',
+            'idle': 'Instance online, world not running',
+            'offline': 'Instance is offline'
+        };
+        return tooltips[status] || 'Unknown status';
+    }
+
+    function updateWorldsGallery(worlds) {
+        const worldsGallery = document.getElementById('worlds-gallery');
+        worldsGallery.innerHTML = '';
+
+        if (worlds.length === 0) {
+            worldsGallery.innerHTML = '<p class="no-worlds">No worlds discovered yet.</p>';
+            return;
+        }
+
+        worlds.forEach(world => {
+            const worldCard = document.createElement('div');
+            worldCard.className = `world-card ${world.status}`;
+            worldCard.setAttribute('data-world-name', world.name.toLowerCase());
+
+            // Load background with fallback chain
+            loadWorldBackground(worldCard, world.cached_background_url, world.instance_url);
+
+            // Status indicator
+            const statusDot = document.createElement('span');
+            statusDot.className = `world-status ${world.status}`;
+            statusDot.title = getStatusTooltip(world.status);
+            worldCard.appendChild(statusDot);
+
+            // Play icon for active worlds
+            if (world.status === 'active') {
+                const playIcon = document.createElement('i');
+                playIcon.className = 'fas fa-play-circle play-icon';
+                worldCard.appendChild(playIcon);
 
                 worldCard.addEventListener('click', () => {
-                    window.open(`${instance.url}/join`, '_blank');
+                    window.open(`${world.instance_url}/join`, '_blank');
                 });
-
-                worldsGallery.appendChild(worldCard);
             }
-        });
 
-        if (!activeWorldsFound) {
-            worldsGallery.innerHTML = '<p class="no-worlds">No active worlds found.</p>';
+            // World info container
+            const infoContainer = document.createElement('div');
+            infoContainer.className = 'world-info';
+
+            const worldName = document.createElement('h3');
+            worldName.textContent = world.name;
+            infoContainer.appendChild(worldName);
+
+            const instanceInfo = document.createElement('p');
+            instanceInfo.className = 'world-instance';
+            instanceInfo.textContent = `on ${world.instance_name}`;
+            infoContainer.appendChild(instanceInfo);
+
+            const timeInfo = document.createElement('p');
+            timeInfo.className = 'world-time';
+            timeInfo.textContent = formatRelativeTime(world.last_seen, world.status === 'active');
+            infoContainer.appendChild(timeInfo);
+
+            // Show players only for active worlds
+            if (world.status === 'active') {
+                const instance = window.instanceCache?.find(i => i.name === world.instance_name);
+                if (instance && instance.active_world && instance.active_world.name === world.name) {
+                    const playerInfo = document.createElement('p');
+                    playerInfo.className = 'world-players';
+                    playerInfo.textContent = `Players: ${instance.active_world.players}`;
+                    infoContainer.appendChild(playerInfo);
+                }
+            }
+
+            worldCard.appendChild(infoContainer);
+
+            // Admin delete button
+            if (state.isAdmin) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-world';
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.title = 'Remove from history';
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteWorldFromHistory(world);
+                });
+                worldCard.appendChild(deleteBtn);
+            }
+
+            worldsGallery.appendChild(worldCard);
+        });
+    }
+
+    function deleteWorldFromHistory(world) {
+        if (!confirm(`Remove "${world.name}" from world history?`)) {
+            return;
         }
+
+        const worldKey = `${world.instance_name}::${world.name}`;
+        fetch(`/api/worlds/${encodeURIComponent(worldKey)}`, {
+            method: 'DELETE'
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    fetchWorlds();  // Refresh the list
+                } else {
+                    alert('Failed to delete world');
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting world:', error);
+                alert('Error deleting world');
+            });
+    }
+
+    // Real-time search filter
+    const searchInput = document.getElementById('world-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const worldCards = document.querySelectorAll('.world-card');
+
+            worldCards.forEach(card => {
+                const worldName = card.getAttribute('data-world-name');
+                if (worldName && worldName.includes(query)) {
+                    card.style.display = '';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        });
     }
 
     // Initial fetch and interval
     if (state.isConfigured && !state.viewerLocked) {
         fetchStatus();
+        fetchWorlds();
         setInterval(fetchStatus, 5000);
+        setInterval(fetchWorlds, 5000);
     }
 });
