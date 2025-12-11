@@ -182,7 +182,7 @@ def check_instance_status(instance_url):
             world_name = driver.title.strip()
 
             # Validate world name - must be non-empty and not a generic loading message
-            if world_name and len(world_name) > 0 and world_name not in ['Foundry Virtual Tabletop', 'Loading...', '']:
+            if world_name and len(world_name) > 0 and world_name not in ['Foundry Virtual Tabletop', 'Loading...', 'foundry.tongatime.us', '']:
                 # Try to get background
                 try:
                     background_url = driver.execute_script("""
