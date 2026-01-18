@@ -26,6 +26,19 @@ app.secret_key = os.urandom(24)
 instance_data_cache = []
 CONFIG_FILE = 'config.yaml'
 
+# -----------------------------------------------------------------------------
+# CONFIG HELPERS
+# -----------------------------------------------------------------------------
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        return {}
+    with open(CONFIG_FILE, 'r') as file:
+        return yaml.safe_load(file) or {}
+
+def save_config(config):
+    with open(CONFIG_FILE, 'w') as file:
+        yaml.dump(config, file)
+
 # --- DYNAMIC DATA DIRECTORY ---
 if os.environ.get('FOUNDRY_DATA_DIR'):
     DATA_DIR = os.environ.get('FOUNDRY_DATA_DIR')
@@ -41,25 +54,14 @@ else:
 REGISTRY_FILE = os.path.join(DATA_DIR, 'instances.json')
 TEMPLATES_DIR = os.path.join(DATA_DIR, 'templates')
 INSTANCES_DIR = os.path.join(DATA_DIR, 'instances') 
+CENTRAL_WORLDS_DIR = os.path.join(DATA_DIR, 'worlds') # <--- NEW CENTRAL FOLDER
 CACHE_DIR = os.path.join(DATA_DIR, 'cache')
 DOCKER_NETWORK = 'foundry_net'
 
 os.makedirs(INSTANCES_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
+os.makedirs(CENTRAL_WORLDS_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
-
-# -----------------------------------------------------------------------------
-# CONFIG HELPERS
-# -----------------------------------------------------------------------------
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        return {}
-    with open(CONFIG_FILE, 'r') as file:
-        return yaml.safe_load(file) or {}
-
-def save_config(config):
-    with open(CONFIG_FILE, 'w') as file:
-        yaml.dump(config, file)
 
 # -----------------------------------------------------------------------------
 # ORCHESTRATOR CLASS
@@ -90,6 +92,42 @@ class Orchestrator:
         while port in used_ports: port += 1
         return port
 
+    def scan_for_new_worlds(self):
+        """Scans CENTRAL_WORLDS_DIR and registers any unknown folders."""
+        print("DEBUG: Scanning for new worlds...")
+        if not os.path.exists(CENTRAL_WORLDS_DIR): return
+
+        registry = self.load_registry()
+        changes_made = False
+
+        # Scan directories in foundry-data/worlds/
+        for dirname in os.listdir(CENTRAL_WORLDS_DIR):
+            dir_path = os.path.join(CENTRAL_WORLDS_DIR, dirname)
+            if os.path.isdir(dir_path):
+                # We found a folder, is it in the registry?
+                if dirname not in registry:
+                    print(f"INFO: Discovered new world '{dirname}'. Auto-registering.")
+                    
+                    # Create the instance boilerplate folder if missing
+                    instance_path = os.path.join(INSTANCES_DIR, dirname)
+                    os.makedirs(instance_path, exist_ok=True)
+                    try: os.chmod(instance_path, 0o777)
+                    except: pass
+
+                    # Register it
+                    registry[dirname] = {
+                        "name": dirname,
+                        "port": self.get_next_port(), # Assign next available port
+                        "template": "Auto-Discovered",
+                        "image_tag": "release",       # Default to latest release
+                        "created_at": time.time()
+                    }
+                    changes_made = True
+        
+        if changes_made:
+            self.save_registry(registry)
+            print("INFO: Registry updated with new worlds.")
+
     def launch_instance(self, name, port):
         if not self.client:
             print(f"CRITICAL ERROR: Cannot launch {name}. Docker client is not connected.")
@@ -97,33 +135,35 @@ class Orchestrator:
 
         game_name = f"foundry_{name}"
         nursery_name = f"nursery_{name}"
+        
+        # 1. Path to the Instance Configs (Logs, Config, etc.)
         instance_path = os.path.join(INSTANCES_DIR, name)
+        
+        # 2. Path to the ACTUAL World Data (The Central "Source of Truth")
+        world_source_path = os.path.join(CENTRAL_WORLDS_DIR, name)
+        
+        # Ensure they exist
+        os.makedirs(instance_path, exist_ok=True)
+        os.makedirs(world_source_path, exist_ok=True)
 
-        # --- Map Host Socket to Container (Docker/Podman Support) ---
+        # --- NEW: Detect Host Socket Path ---
         host_socket_path = '/var/run/docker.sock'
         if os.environ.get('DOCKER_HOST', '').startswith('unix://'):
             host_socket_path = os.environ.get('DOCKER_HOST').replace('unix://', '')
         elif os.path.exists(f'/run/user/{os.getuid()}/podman/podman.sock'):
             host_socket_path = f'/run/user/{os.getuid()}/podman/podman.sock'
         
-        print(f"DEBUG: Mapping Host Socket '{host_socket_path}' to Container.")
-        
         # --- Generate Nursery Config ---
-        # 1. Create a config directory for this specific instance
-        nursery_conf_dir = os.path.join(INSTANCES_DIR, name, 'nursery_config')
+        nursery_conf_dir = os.path.join(instance_path, 'nursery_config')
         os.makedirs(nursery_conf_dir, exist_ok=True)
-        os.chmod(nursery_conf_dir, 0o777)
+        try: os.chmod(nursery_conf_dir, 0o777)
+        except: pass
 
-        # 2. Determine valid domains (Localhost + Your Public IP/Domain)
         config = load_config()
         public_url = config.get('public_host', 'http://localhost')
-        try:
-            hostname = urlparse(public_url).hostname or 'localhost'
-        except:
-            hostname = 'localhost'
+        try: hostname = urlparse(public_url).hostname or 'localhost'
+        except: hostname = 'localhost'
         
-        # 3. Create the config dictionary
-        # This tells Nursery: "If you see a request for localhost or [hostname], send it to the game container"
         nursery_config_data = {
             'proxyListeningPort': 80,
             'proxyHosts': [{
@@ -131,19 +171,18 @@ class Orchestrator:
                 'containerName': game_name,
                 'proxyHost': game_name,
                 'proxyPort': 30000,
-                'timeoutSeconds': 600, # 10 Minutes timeout
+                'timeoutSeconds': 600,
                 'displayName': name
             }]
         }
 
-        # 4. Write config.yml
         config_path = os.path.join(nursery_conf_dir, 'config.yml')
         with open(config_path, 'w') as f:
             yaml.dump(nursery_config_data, f)
-        os.chmod(config_path, 0o777)
-        # ------------------------------------
+        try: os.chmod(config_path, 0o777)
+        except: pass
 
-        # Get configured image tag
+        # Get Image Tag
         registry = self.load_registry()
         image_tag = registry.get(name, {}).get('image_tag', 'release')
 
@@ -158,29 +197,40 @@ class Orchestrator:
         elif os.environ.get('FOUNDRY_ADMIN_KEY'):
             env_vars['FOUNDRY_ADMIN_KEY'] = os.environ.get('FOUNDRY_ADMIN_KEY')
 
-        # Launch Game
+        # 3. Launch Game with OVERLAY MOUNT
         try:
             try:
                 c = self.client.containers.get(game_name)
                 if c.status != 'running': c.start()
             except docker.errors.NotFound:
                 print(f"DEBUG: Spawning {game_name} using tag {image_tag}...")
+                
+                # The Volume Magic happens here:
+                volumes = {
+                    # Base Data (Configs, Logs, Modules) -> /data
+                    os.path.abspath(instance_path): {'bind': '/data', 'mode': 'z'},
+                    
+                    # Shared Cache -> /data/container_cache
+                    os.path.abspath(CACHE_DIR): {'bind': '/data/container_cache', 'mode': 'z'},
+                    
+                    # SPECIFIC WORLD OVERLAY -> /data/Data/worlds/{name}
+                    # This injects the world from the central folder into the container's world slot
+                    os.path.abspath(world_source_path): {'bind': f'/data/Data/worlds/{name}', 'mode': 'z'}
+                }
+
                 self.client.containers.run(
                     f"felddy/foundryvtt:{image_tag}",
                     name=game_name,
                     detach=True,
                     network=DOCKER_NETWORK,
-                    volumes={
-                        os.path.abspath(instance_path): {'bind': '/data', 'mode': 'z'},
-                        os.path.abspath(CACHE_DIR): {'bind': '/data/container_cache', 'mode': 'z'} 
-                    },
+                    volumes=volumes,
                     environment=env_vars
                 )
         except Exception as e:
             print(f"ERROR launching game {name}: {e}")
             return False
 
-        # Launch Nursery
+        # 4. Launch Nursery
         try:
             try:
                 c = self.client.containers.get(nursery_name)
@@ -193,8 +243,9 @@ class Orchestrator:
                     detach=True,
                     network=DOCKER_NETWORK,
                     ports={'80/tcp': port},
+                    user="0:0",
+                    security_opt=["label=disable"],
                     volumes={
-                        # Mount the generated config folder
                         os.path.abspath(nursery_conf_dir): {'bind': '/usr/src/app/config', 'mode': 'z'},
                         host_socket_path: {'bind': '/var/run/docker.sock', 'mode': 'rw'}
                     }
@@ -205,24 +256,25 @@ class Orchestrator:
         return True
 
     def create_instance(self, name, source):
-        """
-        source: can be a template name (e.g., 'lancer') OR a version tag (e.g., 'v12', 'v13')
-        """
         if name in self.load_registry():
             raise ValueError("Instance name already exists.")
         
+        # Create Instance Boilerplate (for Logs/Config)
         instance_root = os.path.join(INSTANCES_DIR, name)
+        
+        # Create Central World Data
+        world_dest_dir = os.path.join(CENTRAL_WORLDS_DIR, name)
         
         # --- LOGIC: Template vs Empty ---
         if source.startswith("v"):
-            # Empty Instance Logic (v12, v13) -> Map "v12" to "12"
+            # Empty Instance Logic
             version_tag = source[1:] 
             image_tag = version_tag
             template_used = None
             
-            # Just create the empty folder structure
-            os.makedirs(os.path.join(instance_root, "Data"), exist_ok=True)
-            print(f"DEBUG: Created empty instance {name} for version {version_tag}")
+            # Just create the empty folder
+            os.makedirs(world_dest_dir, exist_ok=True)
+            print(f"DEBUG: Created empty world {name} in central storage.")
             
         else:
             # Template Logic
@@ -231,22 +283,31 @@ class Orchestrator:
             if not os.path.exists(src):
                 raise ValueError("Template not found.")
             
-            # Use 'release' tag for standard templates, or default to 12
             image_tag = "release" 
             template_used = template_name
             
-            # Copy Files
-            world_dest_dir = os.path.join(instance_root, "Data", "worlds", name)
+            # Copy Template directly to Central Worlds
             print(f"DEBUG: Copying template {src} to {world_dest_dir}")
             shutil.copytree(src, world_dest_dir)
 
-        # Fix Permissions
+        # Fix Permissions (Set to 777 for Container Access)
         try:
+            # Fix Instance Root
+            os.makedirs(instance_root, exist_ok=True)
+            os.chmod(instance_root, 0o777)
+            
+            # Fix World Data (Recursive)
+            for root, dirs, files in os.walk(world_dest_dir):
+                os.chmod(root, 0o777)
+                for d in dirs: os.chmod(os.path.join(root, d), 0o777)
+                for f in files: os.chmod(os.path.join(root, f), 0o777)
+                
+            # Also fix Instance Root recursive just in case
             for root, dirs, files in os.walk(instance_root):
-                os.chown(root, 1000, 1000)
-                for d in dirs: os.chown(os.path.join(root, d), 1000, 1000)
-                for f in files: os.chown(os.path.join(root, f), 1000, 1000)
-        except: pass
+                os.chmod(root, 0o777)
+                for d in dirs: os.chmod(os.path.join(root, d), 0o777)
+        except Exception as e:
+            print(f"WARNING: Failed to set permissions: {e}")
 
         # Register
         registry = self.load_registry()
@@ -267,6 +328,10 @@ class Orchestrator:
         return port
 
     def reconcile(self):
+        # 1. Auto-Discover new folders in 'worlds/'
+        self.scan_for_new_worlds()
+        
+        # 2. Launch everything in registry
         print("DEBUG: Reconciling instances...")
         registry = self.load_registry()
         for name, data in registry.items():
