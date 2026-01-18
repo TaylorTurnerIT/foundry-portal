@@ -7,3 +7,4 @@ venv/
 .env
 foundry-data/
 app-test.py
+nuke_lancer.py
