@@ -5,6 +5,7 @@ import json
 import shutil
 import docker
 import time
+from urllib.parse import urlparse
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session
 from selenium import webdriver
@@ -48,6 +49,19 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # -----------------------------------------------------------------------------
+# CONFIG HELPERS
+# -----------------------------------------------------------------------------
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        return {}
+    with open(CONFIG_FILE, 'r') as file:
+        return yaml.safe_load(file) or {}
+
+def save_config(config):
+    with open(CONFIG_FILE, 'w') as file:
+        yaml.dump(config, file)
+
+# -----------------------------------------------------------------------------
 # ORCHESTRATOR CLASS
 # -----------------------------------------------------------------------------
 class Orchestrator:
@@ -84,18 +98,55 @@ class Orchestrator:
         game_name = f"foundry_{name}"
         nursery_name = f"nursery_{name}"
         instance_path = os.path.join(INSTANCES_DIR, name)
+        
+        # --- NEW: Generate Nursery Config ---
+        # 1. Create a config directory for this specific instance
+        nursery_conf_dir = os.path.join(INSTANCES_DIR, name, 'nursery_config')
+        os.makedirs(nursery_conf_dir, exist_ok=True)
+        os.chmod(nursery_conf_dir, 0o777)
 
-        # Build Environment Variables
+        # 2. Determine valid domains (Localhost + Your Public IP/Domain)
+        config = load_config()
+        public_url = config.get('public_host', 'http://localhost')
+        try:
+            hostname = urlparse(public_url).hostname or 'localhost'
+        except:
+            hostname = 'localhost'
+        
+        # 3. Create the config dictionary
+        # This tells Nursery: "If you see a request for localhost or [hostname], send it to the game container"
+        nursery_config_data = {
+            'proxyListeningPort': 80,
+            'proxyHosts': [{
+                'domain': list(set(['localhost', '127.0.0.1', hostname])),
+                'containerName': game_name,
+                'proxyHost': game_name,
+                'proxyPort': 30000,
+                'timeoutSeconds': 600, # 10 Minutes timeout
+                'displayName': name
+            }]
+        }
+
+        # 4. Write config.yml
+        config_path = os.path.join(nursery_conf_dir, 'config.yml')
+        with open(config_path, 'w') as f:
+            yaml.dump(nursery_config_data, f)
+        os.chmod(config_path, 0o777)
+        # ------------------------------------
+
+        # Get configured image tag
+        registry = self.load_registry()
+        image_tag = registry.get(name, {}).get('image_tag', 'release')
+
         env_vars = {
             "CONTAINER_CACHE": "/data/container_cache",
             "FOUNDRY_WORLD": name
         }
         
-        # Pass credentials from Host to Container (if they exist)
         if os.environ.get('FOUNDRY_USERNAME') and os.environ.get('FOUNDRY_PASSWORD'):
             env_vars['FOUNDRY_USERNAME'] = os.environ.get('FOUNDRY_USERNAME')
             env_vars['FOUNDRY_PASSWORD'] = os.environ.get('FOUNDRY_PASSWORD')
-        elif os.environ.get('FOUNDRY_ADMIN_KEY'): # Optional: some setups use admin keys
+        elif os.environ.get('FOUNDRY_ADMIN_KEY'):
             env_vars['FOUNDRY_ADMIN_KEY'] = os.environ.get('FOUNDRY_ADMIN_KEY')
 
         # Launch Game
@@ -133,9 +184,9 @@ class Orchestrator:
                     detach=True,
                     network=DOCKER_NETWORK,
                     ports={'80/tcp': port},
-                    environment={
-                        "UPSTREAM_HOST": game_name,
-                        "UPSTREAM_PORT": "30000"
+                    volumes={
+                        # Mount the generated config folder
+                        os.path.abspath(nursery_conf_dir): {'bind': '/usr/src/app/config', 'mode': 'z'}
                     }
                 )
         except Exception as e:

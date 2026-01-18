@@ -3,6 +3,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const state = window.portalState || {};
 
     // --- Modal Elements ---
+    const createModal = document.getElementById('create-modal');
+    const createBtn = document.getElementById('create-btn');
+    const createForm = document.getElementById('create-form');
     const initModal = document.getElementById('init-modal');
     const loginModal = document.getElementById('login-modal');
     const configModal = document.getElementById('config-modal');
@@ -26,6 +29,55 @@ document.addEventListener('DOMContentLoaded', () => {
                 openConfigModal();
             } else {
                 openLoginModal();
+            }
+        });
+    }
+
+    // Create Instance Button
+    if (createBtn) {
+        createBtn.addEventListener('click', () => {
+            loadTemplates();
+            createModal.style.display = 'block';
+        });
+    }
+
+    // Create Form Submission
+    if (createForm) {
+        createForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = createForm.querySelector('button');
+            const originalText = btn.textContent;
+            
+            // UI Feedback
+            btn.textContent = "Launching...";
+            btn.disabled = true;
+
+            const name = document.getElementById('new-instance-name').value;
+            const source = document.getElementById('new-instance-source').value;
+
+            try {
+                const response = await fetch('/api/create_instance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, source })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    alert(`Success! Instance running on port ${data.port}`);
+                    createModal.style.display = 'none';
+                    // Trigger status refresh immediately
+                    fetchStatus(); 
+                } else {
+                    const err = await response.json();
+                    alert('Error: ' + (err.error || 'Unknown error'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Network error while creating instance.');
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
             }
         });
     }
@@ -80,7 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     loginModal.style.display = 'none';
                     if (role === 'admin') {
                         state.isAdmin = true;
-                        openConfigModal();
+                        window.location.reload();
                     }
                 } else {
                     alert('Invalid password');
@@ -160,6 +212,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Helper Functions ---
+
+    // [NEW] Fetch Templates for Dropdown
+    async function loadTemplates() {
+        const select = document.getElementById('new-instance-source');
+        select.innerHTML = '<option value="" disabled selected>Loading...</option>';
+        
+        try {
+            const response = await fetch('/api/templates');
+            if (response.ok) {
+                const data = await response.json();
+                select.innerHTML = '<option value="" disabled selected>Select a source...</option>';
+
+                // Group 1: Fresh Installs (Versions)
+                if (data.versions && data.versions.length > 0) {
+                    const group = document.createElement('optgroup');
+                    group.label = "Fresh Install (Empty World)";
+                    data.versions.forEach(v => {
+                        const opt = document.createElement('option');
+                        opt.value = v;
+                        opt.textContent = `Foundry VTT ${v.replace('v', 'Version ')}`;
+                        group.appendChild(opt);
+                    });
+                    select.appendChild(group);
+                }
+
+                // Group 2: Templates
+                if (data.templates && data.templates.length > 0) {
+                    const group = document.createElement('optgroup');
+                    group.label = "Clone Template";
+                    data.templates.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t;
+                        opt.textContent = t;
+                        group.appendChild(opt);
+                    });
+                    select.appendChild(group);
+                }
+            } else {
+                select.innerHTML = '<option disabled>Error loading templates</option>';
+            }
+        } catch (err) {
+            console.error(err);
+            select.innerHTML = '<option disabled>Network Error</option>';
+        }
+    }
 
     function openLoginModal() {
         loginModal.style.display = 'block';

@@ -39,6 +39,12 @@
                 <img class="fa-fake" src="/static/images/github-fa-fake.png" alt="GitHub Repository">
             </button>
             <div class="nav-separator"></div>
+            {% if is_admin %}
+            <button id="create-btn" type="button" title="Create New Instance" style="margin-right: 15px;">
+                <i class="fas fa-plus-circle" style="font-size: 24px; color: #e8eff7;"></i>
+            </button>
+            {% endif %}
+
             <button id="admin-btn" type="button" title="Admin Settings">
                 <i class="fas fa-cog" style="font-size: 24px; color: #e8eff7;"></i>
             </button>
@@ -168,6 +174,27 @@
                     <input type="password" id="viewer-password" required placeholder="Password">
                 </div>
                 <button type="submit" class="btn-primary">Enter</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="create-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Create New Instance</h2>
+            <form id="create-form">
+                <div class="form-group">
+                    <label for="new-instance-name">Instance Name (URL safe):</label>
+                    <input type="text" id="new-instance-name" placeholder="e.g. lancer-campaign" required pattern="[a-zA-Z0-9_-]+">
+                    <p class="help-text">Lowercase letters, numbers, hyphens only.</p>
+                </div>
+                <div class="form-group">
+                    <label for="new-instance-source">Source Template / Version:</label>
+                    <select id="new-instance-source" required>
+                        <option value="" disabled selected>Loading templates...</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-primary">Launch Instance</button>
             </form>
         </div>
     </div>
