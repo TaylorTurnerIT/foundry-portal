@@ -103,23 +103,50 @@ class Orchestrator:
         # Scan directories in foundry-data/worlds/
         for dirname in os.listdir(CENTRAL_WORLDS_DIR):
             dir_path = os.path.join(CENTRAL_WORLDS_DIR, dirname)
+            
+            # Skip hidden files or non-directories
+            if dirname.startswith('.'): continue
+            
             if os.path.isdir(dir_path):
                 # We found a folder, is it in the registry?
                 if dirname not in registry:
                     print(f"INFO: Discovered new world '{dirname}'. Auto-registering.")
                     
-                    # Create the instance boilerplate folder if missing
+                    # 1. Create the instance boilerplate folder if missing
                     instance_path = os.path.join(INSTANCES_DIR, dirname)
                     os.makedirs(instance_path, exist_ok=True)
                     try: os.chmod(instance_path, 0o777)
                     except: pass
 
-                    # Register it
+                    # 2. INTELLIGENT VERSION DETECTION
+                    image_tag = "release" # Default fallback
+                    world_json_path = os.path.join(dir_path, "world.json")
+                    
+                    if os.path.exists(world_json_path):
+                        try:
+                            with open(world_json_path, 'r') as f:
+                                world_data = json.load(f)
+                                
+                                # Priority 1: Check compatibility.verified (e.g., "13.346")
+                                if 'compatibility' in world_data and 'verified' in world_data['compatibility']:
+                                    image_tag = world_data['compatibility']['verified']
+                                    
+                                # Priority 2: Check coreVersion (Older worlds, e.g., "11.315")
+                                elif 'coreVersion' in world_data:
+                                    image_tag = world_data['coreVersion']
+                                    
+                            print(f"DEBUG: Detected version '{image_tag}' for world '{dirname}' from world.json")
+                        except Exception as e:
+                            print(f"WARNING: Failed to read world.json for {dirname}, defaulting to '{image_tag}'. Error: {e}")
+                    else:
+                        print(f"WARNING: No world.json found for {dirname}, defaulting to '{image_tag}'.")
+
+                    # 3. Register it
                     registry[dirname] = {
                         "name": dirname,
                         "port": self.get_next_port(), # Assign next available port
                         "template": "Auto-Discovered",
-                        "image_tag": "release",       # Default to latest release
+                        "image_tag": image_tag, 
                         "created_at": time.time()
                     }
                     changes_made = True
