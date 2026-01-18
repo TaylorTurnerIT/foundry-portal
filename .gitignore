@@ -6,3 +6,4 @@ config.yaml
 venv/
 .env
 foundry-data/
+app-test.py
