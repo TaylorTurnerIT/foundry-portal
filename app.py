@@ -98,8 +98,17 @@ class Orchestrator:
         game_name = f"foundry_{name}"
         nursery_name = f"nursery_{name}"
         instance_path = os.path.join(INSTANCES_DIR, name)
+
+        # --- Map Host Socket to Container (Docker/Podman Support) ---
+        host_socket_path = '/var/run/docker.sock'
+        if os.environ.get('DOCKER_HOST', '').startswith('unix://'):
+            host_socket_path = os.environ.get('DOCKER_HOST').replace('unix://', '')
+        elif os.path.exists(f'/run/user/{os.getuid()}/podman/podman.sock'):
+            host_socket_path = f'/run/user/{os.getuid()}/podman/podman.sock'
         
-        # --- NEW: Generate Nursery Config ---
+        print(f"DEBUG: Mapping Host Socket '{host_socket_path}' to Container.")
+        
+        # --- Generate Nursery Config ---
         # 1. Create a config directory for this specific instance
         nursery_conf_dir = os.path.join(INSTANCES_DIR, name, 'nursery_config')
         os.makedirs(nursery_conf_dir, exist_ok=True)
@@ -187,6 +196,7 @@ class Orchestrator:
                     volumes={
                         # Mount the generated config folder
                         os.path.abspath(nursery_conf_dir): {'bind': '/usr/src/app/config', 'mode': 'z'}
+                        host_socket_path: {'bind': '/var/run/docker.sock', 'mode': 'rw'}
                     }
                 )
         except Exception as e:
