@@ -104,16 +104,14 @@ class Orchestrator:
                 c = self.client.containers.get(game_name)
                 if c.status != 'running': c.start()
             except docker.errors.NotFound:
-                print(f"DEBUG: Spawning {game_name}...")
+                print(f"DEBUG: Spawning {game_name} using tag {image_tag}...")
                 self.client.containers.run(
-                    "felddy/foundryvtt:12.331.0", 
+                    f"felddy/foundryvtt:{image_tag}",
                     name=game_name,
                     detach=True,
                     network=DOCKER_NETWORK,
                     volumes={
-                        # Mount the Instance Data
                         os.path.abspath(instance_path): {'bind': '/data', 'mode': 'z'},
-                        # Mount the Shared Cache (Download once, run everywhere)
                         os.path.abspath(CACHE_DIR): {'bind': '/data/container_cache', 'mode': 'z'} 
                     },
                     environment=env_vars
@@ -145,20 +143,43 @@ class Orchestrator:
             return False
         return True
 
-    def create_instance(self, name, template_name):
-        if name in self.load_registry(): raise ValueError("Instance exists.")
+    def create_instance(self, name, source):
+        """
+        source: can be a template name (e.g., 'lancer') OR a version tag (e.g., 'v12', 'v13')
+        """
+        if name in self.load_registry():
+            raise ValueError("Instance name already exists.")
         
-        src = os.path.join(TEMPLATES_DIR, template_name)
-        if not os.path.exists(src): raise ValueError("Template not found.")
-
-        # Structure: /instances/<name>/Data/worlds/<name>
         instance_root = os.path.join(INSTANCES_DIR, name)
-        world_dest_dir = os.path.join(instance_root, "Data", "worlds", name)
         
-        print(f"DEBUG: Creating world structure at {world_dest_dir}")
-        shutil.copytree(src, world_dest_dir)
+        # --- LOGIC: Template vs Empty ---
+        if source.startswith("v"):
+            # Empty Instance Logic (v12, v13) -> Map "v12" to "12"
+            version_tag = source[1:] 
+            image_tag = version_tag
+            template_used = None
+            
+            # Just create the empty folder structure
+            os.makedirs(os.path.join(instance_root, "Data"), exist_ok=True)
+            print(f"DEBUG: Created empty instance {name} for version {version_tag}")
+            
+        else:
+            # Template Logic
+            template_name = source
+            src = os.path.join(TEMPLATES_DIR, template_name)
+            if not os.path.exists(src):
+                raise ValueError("Template not found.")
+            
+            # Use 'release' tag for standard templates, or default to 12
+            image_tag = "release" 
+            template_used = template_name
+            
+            # Copy Files
+            world_dest_dir = os.path.join(instance_root, "Data", "worlds", name)
+            print(f"DEBUG: Copying template {src} to {world_dest_dir}")
+            shutil.copytree(src, world_dest_dir)
 
-        # Permissions (Best effort)
+        # Fix Permissions
         try:
             for root, dirs, files in os.walk(instance_root):
                 os.chown(root, 1000, 1000)
@@ -166,13 +187,22 @@ class Orchestrator:
                 for f in files: os.chown(os.path.join(root, f), 1000, 1000)
         except: pass
 
+        # Register
         registry = self.load_registry()
         port = self.get_next_port()
-        registry[name] = {"name": name, "port": port, "template": template_name, "created_at": time.time()}
+        
+        registry[name] = {
+            "name": name,
+            "port": port,
+            "template": template_used,
+            "image_tag": image_tag,
+            "created_at": time.time()
+        }
         self.save_registry(registry)
 
         if not self.launch_instance(name, port):
-            raise Exception("Failed to launch containers. Check server logs for 'Docker client' errors.")
+            raise Exception("Failed to launch containers. Check server logs.")
+            
         return port
 
     def reconcile(self):
@@ -302,7 +332,7 @@ def update_instance_statuses():
             'url': public_url,
             'type': 'managed',
             'port': port,
-            'template': data['template'],
+            'template': data.get('template', 'Empty'),
             'status': status,
             'active_world': active_world,
             'background': background_url if background_url else '/static/images/background.jpg'
@@ -358,15 +388,28 @@ def init_config():
 @app.route('/api/templates', methods=['GET'])
 @admin_required
 def get_templates():
-    if not os.path.exists(TEMPLATES_DIR): return jsonify([])
-    return jsonify([d for d in os.listdir(TEMPLATES_DIR) if os.path.isdir(os.path.join(TEMPLATES_DIR, d))])
+    templates = []
+    if os.path.exists(TEMPLATES_DIR):
+        templates = [d for d in os.listdir(TEMPLATES_DIR) if os.path.isdir(os.path.join(TEMPLATES_DIR, d))]
+    
+    response = {
+        'templates': templates,
+        'versions': ['v12', 'v13']
+    }
+    return jsonify(response)
 
 @app.route('/api/create_instance', methods=['POST'])
 @admin_required
 def create_instance():
     data = request.json
+    name = re.sub(r'[^a-z0-9_-]', '', data.get('name', '').lower())
+    source = data.get('source')
+
+    if not name or not source:
+        return jsonify({'error': 'Missing name or source'}), 400
+
     try:
-        port = orchestrator.create_instance(data['name'], data['template'])
+        port = orchestrator.create_instance(name, source)
         update_instance_statuses()
         return jsonify({'success': True, 'port': port})
     except Exception as e:
