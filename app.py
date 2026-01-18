@@ -25,37 +25,27 @@ app.secret_key = os.urandom(24)
 instance_data_cache = []
 CONFIG_FILE = 'config.yaml'
 
-# -----------------------------------------------------------------------------
-# DYNAMIC DATA DIRECTORY CONFIGURATION
-# -----------------------------------------------------------------------------
-# Priority:
-# 1. Environment Variable 'FOUNDRY_DATA_DIR'
-# 2. Production Path '/data/foundry'
-# 3. Local Development Path './foundry-data'
-
+# --- DYNAMIC DATA DIRECTORY ---
 if os.environ.get('FOUNDRY_DATA_DIR'):
     DATA_DIR = os.environ.get('FOUNDRY_DATA_DIR')
 elif os.path.exists('/data/foundry'):
     DATA_DIR = '/data/foundry'
 else:
-    # Local development fallback
+    # Local dev fallback
     DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'foundry-data')
     if not os.path.exists(DATA_DIR):
         print(f"DEBUG: DEV MODE - Creating local data directory at: {DATA_DIR}")
         os.makedirs(DATA_DIR, exist_ok=True)
-    else:
-        print(f"DEBUG: DEV MODE - Using existing local data directory at: {DATA_DIR}")
 
-# Define subdirectories based on the determined DATA_DIR
 REGISTRY_FILE = os.path.join(DATA_DIR, 'instances.json')
 TEMPLATES_DIR = os.path.join(DATA_DIR, 'templates')
-WORLDS_DIR = os.path.join(DATA_DIR, 'worlds')
+INSTANCES_DIR = os.path.join(DATA_DIR, 'instances') 
+CACHE_DIR = os.path.join(DATA_DIR, 'cache')
 DOCKER_NETWORK = 'foundry_net'
-BASE_PORT = 30000 
 
-# Ensure subdirectories exist
-os.makedirs(WORLDS_DIR, exist_ok=True)
+os.makedirs(INSTANCES_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 # -----------------------------------------------------------------------------
 # ORCHESTRATOR CLASS
@@ -63,146 +53,130 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 class Orchestrator:
     def __init__(self):
         try:
-            # Detect if running in Docker or Local
-            # If local, we might need to talk to a remote docker or local socket
             self.client = docker.from_env()
             print("DEBUG ORCHESTRATOR: Docker client connected.")
         except Exception as e:
             print(f"DEBUG ORCHESTRATOR: Failed to connect to Docker socket: {e}")
-            # If in dev mode without Docker, we should handle gracefully or just warn
-            print("WARNING: Docker orchestration features will not work without a Docker socket.")
+            print("TIP: For Podman, ensure the socket is enabled and DOCKER_HOST is set.")
             self.client = None
 
     def load_registry(self):
-        """Load managed instances from JSON."""
-        if not os.path.exists(REGISTRY_FILE):
-            return {}
+        if not os.path.exists(REGISTRY_FILE): return {}
         try:
-            with open(REGISTRY_FILE, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return {}
+            with open(REGISTRY_FILE, 'r') as f: return json.load(f)
+        except: return {}
 
     def save_registry(self, registry):
-        with open(REGISTRY_FILE, 'w') as f:
-            json.dump(registry, f, indent=2)
+        with open(REGISTRY_FILE, 'w') as f: json.dump(registry, f, indent=2)
 
     def get_next_port(self):
-        """Find the next available port starting from 30002."""
         registry = self.load_registry()
         used_ports = {inst['port'] for inst in registry.values()}
         port = 30002
-        while port in used_ports:
-            port += 1
+        while port in used_ports: port += 1
         return port
 
     def launch_instance(self, name, port):
-        """Spawns the Game and Nursery containers for a specific instance."""
         if not self.client:
-            print(f"DEBUG: Skipping launch of {name} (No Docker Client)")
+            print(f"CRITICAL ERROR: Cannot launch {name}. Docker client is not connected.")
             return False
 
-        game_container_name = f"foundry_{name}"
-        nursery_container_name = f"nursery_{name}"
-        world_path = os.path.join(WORLDS_DIR, name)
+        game_name = f"foundry_{name}"
+        nursery_name = f"nursery_{name}"
+        instance_path = os.path.join(INSTANCES_DIR, name)
 
-        # 1. Launch Game Container (felddy/foundryvtt)
+        # Build Environment Variables
+        env_vars = {
+            "CONTAINER_CACHE": "/data/container_cache",
+            "FOUNDRY_WORLD": name
+        }
+        
+        # Pass credentials from Host to Container (if they exist)
+        if os.environ.get('FOUNDRY_USERNAME') and os.environ.get('FOUNDRY_PASSWORD'):
+            env_vars['FOUNDRY_USERNAME'] = os.environ.get('FOUNDRY_USERNAME')
+            env_vars['FOUNDRY_PASSWORD'] = os.environ.get('FOUNDRY_PASSWORD')
+        elif os.environ.get('FOUNDRY_ADMIN_KEY'): # Optional: some setups use admin keys
+            env_vars['FOUNDRY_ADMIN_KEY'] = os.environ.get('FOUNDRY_ADMIN_KEY')
+
+        # Launch Game
         try:
             try:
-                c = self.client.containers.get(game_container_name)
-                if c.status != 'running':
-                    c.start()
+                c = self.client.containers.get(game_name)
+                if c.status != 'running': c.start()
             except docker.errors.NotFound:
-                print(f"DEBUG ORCHESTRATOR: Spawning {game_container_name}...")
+                print(f"DEBUG: Spawning {game_name}...")
                 self.client.containers.run(
-                    "felddy/foundryvtt:release",
-                    name=game_container_name,
+                    "felddy/foundryvtt:12.331.0", 
+                    name=game_name,
                     detach=True,
                     network=DOCKER_NETWORK,
-                    # IMPORTANT: In Dev mode, we are mounting a local path to the container.
-                    # This works if your Dev Docker is on the same machine.
-                    volumes={os.path.abspath(world_path): {'bind': '/data', 'mode': 'rw'}},
-                    environment={"CONTAINER_CACHE": "/data/container_cache"}
+                    volumes={
+                        # Mount the Instance Data
+                        os.path.abspath(instance_path): {'bind': '/data', 'mode': 'z'},
+                        # Mount the Shared Cache (Download once, run everywhere)
+                        os.path.abspath(CACHE_DIR): {'bind': '/data/container_cache', 'mode': 'z'} 
+                    },
+                    environment=env_vars
                 )
         except Exception as e:
             print(f"ERROR launching game {name}: {e}")
             return False
 
-        # 2. Launch Nursery Container
+        # Launch Nursery
         try:
             try:
-                c = self.client.containers.get(nursery_container_name)
-                if c.status != 'running':
-                    c.start()
+                c = self.client.containers.get(nursery_name)
+                if c.status != 'running': c.start()
             except docker.errors.NotFound:
-                print(f"DEBUG ORCHESTRATOR: Spawning {nursery_container_name} on port {port}...")
+                print(f"DEBUG: Spawning {nursery_name} on port {port}...")
                 self.client.containers.run(
-                    "ghcr.io/itsthejoker/containernursery:latest",
-                    name=nursery_container_name,
+                    "ghcr.io/itsecholot/containernursery:1.9.0",
+                    name=nursery_name,
                     detach=True,
                     network=DOCKER_NETWORK,
                     ports={'80/tcp': port},
                     environment={
-                        "UPSTREAM_HOST": game_container_name,
+                        "UPSTREAM_HOST": game_name,
                         "UPSTREAM_PORT": "30000"
                     }
                 )
         except Exception as e:
             print(f"ERROR launching nursery {name}: {e}")
             return False
-            
         return True
 
     def create_instance(self, name, template_name):
-        """Creates files from template and registers the instance."""
-        if name in self.load_registry():
-            raise ValueError("Instance name already exists.")
+        if name in self.load_registry(): raise ValueError("Instance exists.")
         
         src = os.path.join(TEMPLATES_DIR, template_name)
-        dst = os.path.join(WORLDS_DIR, name)
+        if not os.path.exists(src): raise ValueError("Template not found.")
 
-        if not os.path.exists(src):
-            raise ValueError("Template not found.")
+        # Structure: /instances/<name>/Data/worlds/<name>
+        instance_root = os.path.join(INSTANCES_DIR, name)
+        world_dest_dir = os.path.join(instance_root, "Data", "worlds", name)
+        
+        print(f"DEBUG: Creating world structure at {world_dest_dir}")
+        shutil.copytree(src, world_dest_dir)
 
-        # Copy Files
-        print(f"DEBUG ORCHESTRATOR: Copying template {src} to {dst}")
-        shutil.copytree(src, dst)
-
-        # Fix Permissions
-        # On local dev (Windows/Mac), chown might fail or be unnecessary.
-        # We wrap it in a try/except to be safe for dev mode.
+        # Permissions (Best effort)
         try:
-            for root, dirs, files in os.walk(dst):
+            for root, dirs, files in os.walk(instance_root):
                 os.chown(root, 1000, 1000)
-                for d in dirs:
-                    os.chown(os.path.join(root, d), 1000, 1000)
-                for f in files:
-                    os.chown(os.path.join(root, f), 1000, 1000)
-        except AttributeError:
-            # os.chown not available on Windows
-            pass
-        except PermissionError:
-            print("WARNING: Could not change ownership of world files. Container might have issues if UIDs don't match.")
+                for d in dirs: os.chown(os.path.join(root, d), 1000, 1000)
+                for f in files: os.chown(os.path.join(root, f), 1000, 1000)
+        except: pass
 
-        # Update Registry
         registry = self.load_registry()
         port = self.get_next_port()
-        
-        registry[name] = {
-            "name": name,
-            "port": port,
-            "template": template_name,
-            "created_at": time.time()
-        }
+        registry[name] = {"name": name, "port": port, "template": template_name, "created_at": time.time()}
         self.save_registry(registry)
 
-        # Launch
-        self.launch_instance(name, port)
+        if not self.launch_instance(name, port):
+            raise Exception("Failed to launch containers. Check server logs for 'Docker client' errors.")
         return port
 
     def reconcile(self):
-        """Ensure all registered instances are running."""
-        print("DEBUG ORCHESTRATOR: Reconciling instances...")
+        print("DEBUG: Reconciling instances...")
         registry = self.load_registry()
         for name, data in registry.items():
             self.launch_instance(name, data['port'])
@@ -297,7 +271,7 @@ def update_instance_statuses():
     config = load_config()
     final_instances = []
 
-    # 1. Process Static Instances
+    # Process Static Instances (config.yaml)
     if 'instances' in config:
         for instance in config['instances']:
             status, active_world, background_url = check_instance_status(instance['url'])
@@ -310,21 +284,16 @@ def update_instance_statuses():
                 'background': background_url if background_url else '/static/images/background.jpg'
             })
 
-    # 2. Process Managed Instances
+    # Process Managed Instances (Orchestrator)
     registry = orchestrator.load_registry()
-    public_host = config.get('public_host', 'http://localhost') 
+    public_host = config.get('public_host', 'http://localhost')
     
     for name, data in registry.items():
         port = data['port']
         public_url = f"{public_host}:{port}"
         
-        # Optimization: In real production, use internal_url. 
-        # In local dev, internal_url (http://nursery_name) won't resolve unless you have custom DNS/Hosts.
-        # So for DEV, we just use public_url (localhost:port).
-        if os.path.exists('/data/foundry'):
-             internal_url = f"http://nursery_{name}:80"
-        else:
-             internal_url = public_url
+        # In Dev, we use public_url. In Prod, you might use http://nursery_{name}:80
+        internal_url = public_url 
 
         status, active_world, background_url = check_instance_status(public_url, internal_url=internal_url)
         
@@ -340,7 +309,6 @@ def update_instance_statuses():
         })
 
     instance_data_cache = final_instances
-    print(f"Instance statuses updated. Total: {len(final_instances)}")
 
 # --- Authentication Decorators ---
 def admin_required(f):
@@ -390,32 +358,19 @@ def init_config():
 @app.route('/api/templates', methods=['GET'])
 @admin_required
 def get_templates():
-    if not os.path.exists(TEMPLATES_DIR):
-        return jsonify([])
-    templates = [d for d in os.listdir(TEMPLATES_DIR) if os.path.isdir(os.path.join(TEMPLATES_DIR, d))]
-    return jsonify(templates)
+    if not os.path.exists(TEMPLATES_DIR): return jsonify([])
+    return jsonify([d for d in os.listdir(TEMPLATES_DIR) if os.path.isdir(os.path.join(TEMPLATES_DIR, d))])
 
 @app.route('/api/create_instance', methods=['POST'])
 @admin_required
 def create_instance():
     data = request.json
-    name = data.get('name')
-    template = data.get('template')
-    
-    if not name or not template:
-        return jsonify({'error': 'Missing name or template'}), 400
-        
-    name = re.sub(r'[^a-z0-9_-]', '', name.lower())
-    
     try:
-        port = orchestrator.create_instance(name, template)
+        port = orchestrator.create_instance(data['name'], data['template'])
         update_instance_statuses()
         return jsonify({'success': True, 'port': port})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
     except Exception as e:
-        print(f"CREATE ERROR: {e}")
-        return jsonify({'error': 'Internal Server Error'}), 500
+        return jsonify({'error': str(e)}), 400
 
 @app.route('/api/config', methods=['GET', 'POST'])
 @admin_required
