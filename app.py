@@ -195,7 +195,7 @@ class Orchestrator:
                     ports={'80/tcp': port},
                     volumes={
                         # Mount the generated config folder
-                        os.path.abspath(nursery_conf_dir): {'bind': '/usr/src/app/config', 'mode': 'z'}
+                        os.path.abspath(nursery_conf_dir): {'bind': '/usr/src/app/config', 'mode': 'z'},
                         host_socket_path: {'bind': '/var/run/docker.sock', 'mode': 'rw'}
                     }
                 )
