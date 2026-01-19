@@ -226,7 +226,14 @@ class Orchestrator:
 
         env_vars = {
             "CONTAINER_CACHE": "/data/container_cache",
-            "FOUNDRY_WORLD": name
+            "FOUNDRY_IP_DISCOVERY": "false",
+            "FOUNDRY_WORLD": name,
+            "FOUNDRY_HOSTNAME": "foundry.tongatime.us",
+            "FOUNDRY_ROUTE_PREFIX": name, 
+            "FOUNDRY_PROXY_SSL": "true",
+            "FOUNDRY_PROXY_PORT": "443",
+            "FOUNDRY_COMPRESS_WEBSOCKET": "true",
+            "FOUNDRY_MINIFY_STATIC_FILES": "true"
         }
         
         if os.environ.get('FOUNDRY_USERNAME') and os.environ.get('FOUNDRY_PASSWORD'):
@@ -359,10 +366,11 @@ class Orchestrator:
             "created_at": time.time()
         }
         self.save_registry(registry)
-
+        
         if not self.launch_instance(name, port):
-            raise Exception("Failed to launch containers. Check server logs.")
+            raise Exception("Failed to launch containers.")
             
+        self.update_caddy_routes()
         return port
 
     def reconcile(self):
@@ -374,6 +382,31 @@ class Orchestrator:
         registry = self.load_registry()
         for name, data in registry.items():
             self.launch_instance(name, data['port'])
+
+        self.update_caddy_routes()
+
+    def update_caddy_routes(self):
+        """Generates a Caddy config file for dynamic routing."""
+        print("DEBUG: Updating Caddy routes...")
+        registry = self.load_registry()
+        
+        # We write to /data because that is mounted to /var/lib/foundry-portal on the host
+        caddy_file_path = "/data/routes.caddy" 
+        
+        lines = []
+        for name, data in registry.items():
+            port = data['port']
+            lines.append(f"handle /{name}* {{")
+            lines.append(f"    reverse_proxy 127.0.0.1:{port}")
+            lines.append("}")
+        
+        try:
+            with open(caddy_file_path, 'w') as f:
+                f.write("\n".join(lines))
+            # Ensure Caddy on host can read it (World Readable)
+            os.chmod(caddy_file_path, 0o644)
+        except Exception as e:
+            print(f"ERROR: Failed to write Caddy routes: {e}")
 
 orchestrator = Orchestrator()
 
@@ -503,6 +536,7 @@ def update_instance_statuses():
         })
 
     instance_data_cache = final_instances
+
 
 # --- Authentication Decorators ---
 def admin_required(f):
