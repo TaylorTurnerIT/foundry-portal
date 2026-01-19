@@ -392,9 +392,11 @@ class Orchestrator:
         lines = []
         for name, data in registry.items():
             port = data['port']
-            public_url = f"{public_host}/{name}"
-            internal_url = f"http://127.0.0.1:{port}"
-            status, active_world, background_url = check_instance_status(public_url, internal_url=internal_url)
+            # Generate the Caddy handle block
+            lines.append(f"handle /{name}* {{")
+            lines.append(f"    reverse_proxy 127.0.0.1:{port}")
+            lines.append("}")
+        
         try:
             with open(CADDY_ROUTES_FILE, 'w') as f:
                 f.write("\n".join(lines))
@@ -492,6 +494,7 @@ def update_instance_statuses():
     global instance_data_cache
     config = load_config()
     final_instances = []
+    public_host = config.get('public_host', 'http://localhost')
 
     # Process Static Instances (config.yaml)
     if 'instances' in config:
@@ -508,20 +511,21 @@ def update_instance_statuses():
 
     # Process Managed Instances (Orchestrator)
     registry = orchestrator.load_registry()
-    public_host = config.get('public_host', 'http://localhost')
     
     for name, data in registry.items():
         port = data['port']
-        public_url = f"{public_host}:{port}"
         
-        # In Dev, we use public_url. In Prod, you might use http://nursery_{name}:80
-        internal_url = public_url 
+        # [CRITICAL] This is where the Path-Based URL logic goes
+        public_url = f"{public_host}/{name}"
+        
+        # Use localhost for internal scraping
+        internal_url = f"http://127.0.0.1:{port}"
 
         status, active_world, background_url = check_instance_status(public_url, internal_url=internal_url)
         
         final_instances.append({
             'name': name,
-            'url': public_url,
+            'url': public_url,  # <--- Uses the variable defined above
             'type': 'managed',
             'port': port,
             'template': data.get('template', 'Empty'),
@@ -531,7 +535,6 @@ def update_instance_statuses():
         })
 
     instance_data_cache = final_instances
-
 
 # --- Authentication Decorators ---
 def admin_required(f):
