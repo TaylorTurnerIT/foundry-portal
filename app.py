@@ -251,7 +251,6 @@ class Orchestrator:
             except docker.errors.NotFound:
                 print(f"DEBUG: Spawning {game_name} using tag {image_tag}...")
                 
-                # The Volume Magic happens here:
                 volumes = {
                     # Base Data (Configs, Logs, Modules) -> /data
                     os.path.abspath(instance_path): {'bind': '/data', 'mode': 'z'},
@@ -260,8 +259,10 @@ class Orchestrator:
                     os.path.abspath(CACHE_DIR): {'bind': '/data/container_cache', 'mode': 'z'},
                     
                     # SPECIFIC WORLD OVERLAY -> /data/Data/worlds/{name}
-                    # This injects the world from the central folder into the container's world slot
-                    os.path.abspath(world_source_path): {'bind': f'/data/Data/worlds/{name}', 'mode': 'z'}
+                    os.path.abspath(world_source_path): {'bind': f'/data/Data/worlds/{name}', 'mode': 'z'},
+
+                    # Maps the portal's secret file to the game's secret file
+                    '/run/secrets/foundry_secrets.json': {'bind': '/run/secrets/config.json', 'mode': 'ro'}
                 }
 
                 self.client.containers.run(
@@ -391,11 +392,9 @@ class Orchestrator:
         lines = []
         for name, data in registry.items():
             port = data['port']
-            # Generate the Caddy handle block
-            lines.append(f"handle /{name}* {{")
-            lines.append(f"    reverse_proxy 127.0.0.1:{port}")
-            lines.append("}")
-        
+            public_url = f"{public_host}/{name}"
+            internal_url = f"http://127.0.0.1:{port}"
+            status, active_world, background_url = check_instance_status(public_url, internal_url=internal_url)
         try:
             with open(CADDY_ROUTES_FILE, 'w') as f:
                 f.write("\n".join(lines))
