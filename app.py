@@ -56,6 +56,7 @@ TEMPLATES_DIR = os.path.join(DATA_DIR, 'templates')
 INSTANCES_DIR = os.path.join(DATA_DIR, 'instances') 
 CENTRAL_WORLDS_DIR = os.path.join(DATA_DIR, 'worlds') # <--- NEW CENTRAL FOLDER
 CACHE_DIR = os.path.join(DATA_DIR, 'cache')
+CADDY_ROUTES_FILE = '/data/routes.caddy'
 DOCKER_NETWORK = 'foundry_net'
 
 os.makedirs(INSTANCES_DIR, exist_ok=True)
@@ -382,31 +383,26 @@ class Orchestrator:
         registry = self.load_registry()
         for name, data in registry.items():
             self.launch_instance(name, data['port'])
-
         self.update_caddy_routes()
 
     def update_caddy_routes(self):
-        """Generates a Caddy config file for dynamic routing."""
         print("DEBUG: Updating Caddy routes...")
         registry = self.load_registry()
-        
-        # We write to /data because that is mounted to /var/lib/foundry-portal on the host
-        caddy_file_path = "/data/routes.caddy" 
-        
         lines = []
         for name, data in registry.items():
             port = data['port']
+            # Generate the Caddy handle block
             lines.append(f"handle /{name}* {{")
             lines.append(f"    reverse_proxy 127.0.0.1:{port}")
             lines.append("}")
         
         try:
-            with open(caddy_file_path, 'w') as f:
+            with open(CADDY_ROUTES_FILE, 'w') as f:
                 f.write("\n".join(lines))
-            # Ensure Caddy on host can read it (World Readable)
-            os.chmod(caddy_file_path, 0o644)
+            # Ensure Caddy (on host) can read it
+            os.chmod(CADDY_ROUTES_FILE, 0o644)
         except Exception as e:
-            print(f"ERROR: Failed to write Caddy routes: {e}")
+            print(f"ERROR writing Caddy routes: {e}")
 
 orchestrator = Orchestrator()
 
