@@ -93,67 +93,65 @@ class Orchestrator:
         return port
 
     def scan_for_new_worlds(self):
-        """Scans CENTRAL_WORLDS_DIR and registers any unknown folders."""
+        """Scans CENTRAL_WORLDS_DIR. Registers new worlds AND updates versions for existing ones."""
         print("DEBUG: Scanning for new worlds...")
         if not os.path.exists(CENTRAL_WORLDS_DIR): return
-
-        registry = self.load_registry()
-        changes_made = False
 
         # Scan directories in foundry-data/worlds/
         for dirname in os.listdir(CENTRAL_WORLDS_DIR):
             dir_path = os.path.join(CENTRAL_WORLDS_DIR, dirname)
-            
-            # Skip hidden files or non-directories
             if dirname.startswith('.'): continue
             
             if os.path.isdir(dir_path):
-                # We found a folder, is it in the registry?
+                # 1. Detect Version from world.json (Always do this)
+                image_tag = "release" # Default
+                world_json_path = os.path.join(dir_path, "world.json")
+                
+                if os.path.exists(world_json_path):
+                    try:
+                        with open(world_json_path, 'r') as f:
+                            world_data = json.load(f)
+                            if 'compatibility' in world_data and 'verified' in world_data['compatibility']:
+                                image_tag = world_data['compatibility']['verified']
+                            elif 'coreVersion' in world_data:
+                                image_tag = world_data['coreVersion']
+                    except Exception as e:
+                        print(f"WARNING: Failed to read world.json for {dirname}: {e}")
+                
+                # Load registry fresh for every item to ensure port safety
+                registry = self.load_registry()
+                changes_made = False
+
+                # 2. Register New World
                 if dirname not in registry:
                     print(f"INFO: Discovered new world '{dirname}'. Auto-registering.")
                     
-                    # 1. Create the instance boilerplate folder if missing
                     instance_path = os.path.join(INSTANCES_DIR, dirname)
                     os.makedirs(instance_path, exist_ok=True)
                     try: os.chmod(instance_path, 0o777)
                     except: pass
 
-                    # 2. INTELLIGENT VERSION DETECTION
-                    image_tag = "release" # Default fallback
-                    world_json_path = os.path.join(dir_path, "world.json")
-                    
-                    if os.path.exists(world_json_path):
-                        try:
-                            with open(world_json_path, 'r') as f:
-                                world_data = json.load(f)
-                                
-                                # Priority 1: Check compatibility.verified (e.g., "13.346")
-                                if 'compatibility' in world_data and 'verified' in world_data['compatibility']:
-                                    image_tag = world_data['compatibility']['verified']
-                                    
-                                # Priority 2: Check coreVersion (Older worlds, e.g., "11.315")
-                                elif 'coreVersion' in world_data:
-                                    image_tag = world_data['coreVersion']
-                                    
-                            print(f"DEBUG: Detected version '{image_tag}' for world '{dirname}' from world.json")
-                        except Exception as e:
-                            print(f"WARNING: Failed to read world.json for {dirname}, defaulting to '{image_tag}'. Error: {e}")
-                    else:
-                        print(f"WARNING: No world.json found for {dirname}, defaulting to '{image_tag}'.")
-
-                    # 3. Register it
                     registry[dirname] = {
                         "name": dirname,
-                        "port": self.get_next_port(), # Assign next available port
+                        "port": self.get_next_port(), # Will now be accurate
                         "template": "Auto-Discovered",
                         "image_tag": image_tag, 
                         "created_at": time.time()
                     }
                     changes_made = True
-        
-        if changes_made:
-            self.save_registry(registry)
-            print("INFO: Registry updated with new worlds.")
+                
+                # 3. Update Existing World Version
+                else:
+                    current_tag = registry[dirname].get('image_tag')
+                    # Update if tag is different OR if it was missing
+                    if current_tag != image_tag:
+                        print(f"INFO: Updating version for '{dirname}' from {current_tag} to {image_tag}")
+                        registry[dirname]['image_tag'] = image_tag
+                        changes_made = True
+
+                # Save immediately to lock in the port/changes
+                if changes_made:
+                    self.save_registry(registry)
 
     def launch_instance(self, name, port):
         if not self.client:
@@ -212,6 +210,19 @@ class Orchestrator:
         # Get Image Tag
         registry = self.load_registry()
         image_tag = registry.get(name, {}).get('image_tag', 'release')
+
+        # --- Pre-Create Directory Structure ---
+        # We must create 'Data/worlds' in the instance folder so Podman 
+        # doesn't auto-create it with Root permissions when we mount the overlay.
+        structure_path = os.path.join(instance_path, "Data", "worlds")
+        os.makedirs(structure_path, exist_ok=True)
+        try:
+            # Recursively fix permissions from root of instance down
+            for root, dirs, files in os.walk(instance_path):
+                os.chmod(root, 0o777)
+                for d in dirs: os.chmod(os.path.join(root, d), 0o777)
+                for f in files: os.chmod(os.path.join(root, f), 0o777)
+        except: pass
 
         env_vars = {
             "CONTAINER_CACHE": "/data/container_cache",
