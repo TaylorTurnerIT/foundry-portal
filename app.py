@@ -232,6 +232,7 @@ class Orchestrator:
                 for f in files: os.chmod(os.path.join(root, f), 0o777)
         except: pass
 
+        # --- Environment Variables Construction ---
         env_vars = {
             "CONTAINER_CACHE": "/data/container_cache",
             "FOUNDRY_IP_DISCOVERY": "false",
@@ -243,9 +244,25 @@ class Orchestrator:
             "FOUNDRY_COMPRESS_WEBSOCKET": "true",
             "FOUNDRY_MINIFY_STATIC_FILES": "true"
         }
-        env_vars['FOUNDRY_USERNAME'] = os.environ.get('FOUNDRY_USERNAME')
-        env_vars['FOUNDRY_PASSWORD'] = os.environ.get('FOUNDRY_PASSWORD')
-        env_vars['FOUNDRY_ADMIN_KEY'] = os.environ.get('FOUNDRY_ADMIN_KEY')
+
+        # 1. Explicitly pass Secrets and Critical Vars
+        # FOUNDRY_LICENSE_KEY will now be populated from the shell export we added in Nix
+        explicit_pass_keys = [
+            'FOUNDRY_USERNAME', 
+            'FOUNDRY_PASSWORD', 
+            'FOUNDRY_ADMIN_KEY', 
+            'FOUNDRY_LICENSE_KEY'
+        ]
+        
+        for key in explicit_pass_keys:
+            if os.environ.get(key):
+                env_vars[key] = os.environ.get(key)
+
+        # 2. Dynamic Pass-through for Non-Secret Control
+        # Allows you to set any FOUNDRY_ var in Nix (e.g. FOUNDRY_AWS_CONFIG) and have it passed down
+        for k, v in os.environ.items():
+            if k.startswith('FOUNDRY_') and k not in env_vars:
+                env_vars[k] = v
 
         # 3. Launch Game with OVERLAY MOUNT
         try:
