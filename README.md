@@ -72,9 +72,10 @@ Before setting up Foundry Portal, ensure you have the following installed on you
    ```
    docker run -d -p 5000:5000 \
    -v /path/to/your/config.yaml:/app/config.yaml \
+   -e FOUNDRY_DOMAIN=foundry.tongatime.us \
    --name foundry_portal_container foundry-portal
    ```
-   Ensuring that you replace "/path/to/your/config.yaml" with a path on your host to a config file. You can use config.template.yaml from this repo as a starting point.
+   Ensuring that you replace "/path/to/your/config.yaml" with a path on your host to a config file. You can use config.template.yaml from this repo as a starting point. Set `FOUNDRY_DOMAIN` to your actual domain (or omit it to use the default `localhost`).
 
 
 ## Configuration
@@ -103,8 +104,31 @@ Before setting up Foundry Portal, ensure you have the following installed on you
      - **`true`**: Enables the "Activate World" button, allowing activation across shared data instances.
      - **`false`**: Disables the "Activate World" button; instances operate independently.
 
-   - **`instances`**: 
+   - **`instances`**:
      - List each Foundry instance with a unique `name` and accessible `url`.
+
+## Environment Variables
+
+Foundry Portal supports the following environment variables:
+
+- **`FOUNDRY_DOMAIN`**: The domain name to use for displaying instance URLs on the main page.
+  - Default: `localhost`
+  - Example: `foundry.tongatime.us`
+  - When set to `localhost`, URLs will use `http://` protocol. For other domains, `https://` will be used.
+  - This value is used as the `FOUNDRY_HOSTNAME` for Foundry containers and as the default for `public_host` if not configured.
+
+- **`FOUNDRY_DATA_DIR`**: The directory where Foundry Portal stores instance data, worlds, and templates.
+  - Default: `/data/foundry` (in Docker) or `./foundry-data` (local dev)
+
+- **`FOUNDRY_USERNAME`** & **`FOUNDRY_PASSWORD`**: Foundry VTT admin credentials.
+  - Used for automatic authentication when launching instances.
+  - Alternative: Use `FOUNDRY_ADMIN_KEY` instead.
+
+Example usage:
+```bash
+export FOUNDRY_DOMAIN=foundry.tongatime.us
+python app.py
+```
 
 ## Running the Application
 

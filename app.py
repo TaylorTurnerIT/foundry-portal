@@ -26,6 +26,13 @@ app.secret_key = os.urandom(24)
 instance_data_cache = []
 CONFIG_FILE = 'config.yaml'
 
+# --- DOMAIN CONFIGURATION ---
+# Get domain from environment variable, default to localhost
+FOUNDRY_DOMAIN = os.environ.get('FOUNDRY_DOMAIN', 'localhost')
+# Construct default public host URL based on domain
+# Use https for non-localhost domains, http for localhost
+DEFAULT_PUBLIC_HOST = f"https://{FOUNDRY_DOMAIN}" if FOUNDRY_DOMAIN != 'localhost' else "http://localhost"
+
 # -----------------------------------------------------------------------------
 # CONFIG HELPERS
 # -----------------------------------------------------------------------------
@@ -186,9 +193,9 @@ class Orchestrator:
         except: pass
 
         config = load_config()
-        public_url = config.get('public_host', 'http://localhost')
-        try: hostname = urlparse(public_url).hostname or 'localhost'
-        except: hostname = 'localhost'
+        public_url = config.get('public_host', DEFAULT_PUBLIC_HOST)
+        try: hostname = urlparse(public_url).hostname or FOUNDRY_DOMAIN
+        except: hostname = FOUNDRY_DOMAIN
         
         nursery_config_data = {
             'proxyListeningPort': 80,
@@ -229,8 +236,8 @@ class Orchestrator:
             "CONTAINER_CACHE": "/data/container_cache",
             "FOUNDRY_IP_DISCOVERY": "false",
             "FOUNDRY_WORLD": name,
-            "FOUNDRY_HOSTNAME": "foundry.tongatime.us",
-            "FOUNDRY_ROUTE_PREFIX": name, 
+            "FOUNDRY_HOSTNAME": FOUNDRY_DOMAIN,
+            "FOUNDRY_ROUTE_PREFIX": name,
             "FOUNDRY_PROXY_SSL": "true",
             "FOUNDRY_PROXY_PORT": "443",
             "FOUNDRY_COMPRESS_WEBSOCKET": "true",
@@ -494,7 +501,7 @@ def update_instance_statuses():
     global instance_data_cache
     config = load_config()
     final_instances = []
-    public_host = config.get('public_host', 'http://localhost')
+    public_host = config.get('public_host', DEFAULT_PUBLIC_HOST)
 
     # Process Static Instances (config.yaml)
     if 'instances' in config:
@@ -619,7 +626,7 @@ def handle_config():
         safe_config = {
             'shared_data_mode': config.get('shared_data_mode', False),
             'instances': config.get('instances', []),
-            'public_host': config.get('public_host', 'http://localhost'),
+            'public_host': config.get('public_host', DEFAULT_PUBLIC_HOST),
             'viewer_access_enabled': bool(config.get('viewer_password_hash'))
         }
         return jsonify(safe_config)
