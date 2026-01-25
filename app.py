@@ -278,7 +278,7 @@ class Orchestrator:
                     detach=True,
                     network=DOCKER_NETWORK,
                     volumes=volumes,
-                    environment=env_vars
+                    environment=env_vars,
                     ports={'30000/tcp': port}
                 )
         except Exception as e:
