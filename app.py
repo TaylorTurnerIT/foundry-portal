@@ -279,6 +279,7 @@ class Orchestrator:
                     network=DOCKER_NETWORK,
                     volumes=volumes,
                     environment=env_vars
+                    ports={'30000/tcp': port}
                 )
         except Exception as e:
             print(f"ERROR launching game {name}: {e}")
