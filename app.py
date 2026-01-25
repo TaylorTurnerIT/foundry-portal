@@ -243,12 +243,9 @@ class Orchestrator:
             "FOUNDRY_COMPRESS_WEBSOCKET": "true",
             "FOUNDRY_MINIFY_STATIC_FILES": "true"
         }
-        
-        if os.environ.get('FOUNDRY_USERNAME') and os.environ.get('FOUNDRY_PASSWORD'):
-            env_vars['FOUNDRY_USERNAME'] = os.environ.get('FOUNDRY_USERNAME')
-            env_vars['FOUNDRY_PASSWORD'] = os.environ.get('FOUNDRY_PASSWORD')
-        elif os.environ.get('FOUNDRY_ADMIN_KEY'):
-            env_vars['FOUNDRY_ADMIN_KEY'] = os.environ.get('FOUNDRY_ADMIN_KEY')
+        env_vars['FOUNDRY_USERNAME'] = os.environ.get('FOUNDRY_USERNAME')
+        env_vars['FOUNDRY_PASSWORD'] = os.environ.get('FOUNDRY_PASSWORD')
+        env_vars['FOUNDRY_ADMIN_KEY'] = os.environ.get('FOUNDRY_ADMIN_KEY')
 
         # 3. Launch Game with OVERLAY MOUNT
         try:
