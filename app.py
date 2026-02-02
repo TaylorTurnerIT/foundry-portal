@@ -246,16 +246,19 @@ class Orchestrator:
         }
         
         # --- Load Secrets from JSON if available ---
-        # This fixes the issue where felddy/foundryvtt ignores the mounted config.json
         secrets_path = '/run/secrets/foundry_secrets.json'
         if os.path.exists(secrets_path):
             try:
                 with open(secrets_path, 'r') as f:
                     secrets_data = json.load(f)
                     for k, v in secrets_data.items():
-                        # Inject keys like FOUNDRY_USERNAME directly into the container env
-                        if k.startswith('FOUNDRY_'):
-                            env_vars[k] = v
+                        # Convert key to UPPERCASE to match container requirements
+                        # e.g. "foundry_username" -> "FOUNDRY_USERNAME"
+                        k_upper = k.upper()
+                        
+                        if k_upper.startswith('FOUNDRY_'):
+                            env_vars[k_upper] = v
+                            
                     print(f"DEBUG: Loaded secrets from {secrets_path}")
             except Exception as e:
                 print(f"WARNING: Failed to load secrets from {secrets_path}: {e}")
